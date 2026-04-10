@@ -1,225 +1,264 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deeprotection WebGUI</title>
+    <title>Deeprotection WebGUI | Security Console</title>
     <link rel="icon" href="/favicon.ico" type="image/x-icon" />
     <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 </head>
-
 <body>
-	<div class="notification-container" id="notificationContainer"></div>
-    <div class="container">
-        <header>
-            <h1>Deeprotection WebGUI</h1>
-            <div class="status">
-                <span id="status-indicator"></span>
-                <span id="status-text">Loading...</span>
+    <div class="notification-container" id="notificationContainer"></div>
+    
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-logo"></div>
+                <h1>Deeprotection</h1>
+                <span class="brand-subtitle">SYSTEM CONSOLE</span>
             </div>
-        </header>
+            
+            <div class="system-status-indicator">
+                <div class="status-dot" id="status-indicator"></div>
+                <span class="status-label" id="status-text">INITIALIZING...</span>
+            </div>
 
-        <nav>
-            <ul>
-                <li><a href="#" data-page="dashboard">Dashboard</a></li>
-                <li><a href="#" data-page="config">Configuration</a></li>
-                <li><a href="#" data-page="rules">Protection Rules</a></li>
-                <li><a href="#" data-page="logs">Logs</a></li>
-                <li><a href="#" data-page="tools">Terminal</a></li>
-            </ul>
-        </nav>
+            <nav>
+                <ul>
+                    <li><a href="#" data-page="dashboard" class="active">System Overview</a></li>
+                    <li><a href="#" data-page="config">Configuration Management</a></li>
+                    <li><a href="#" data-page="rules">Rule Management</a></li>
+                    <li><a href="#" data-page="logs">Log Viewing</a></li>
+                    <li><a href="#" data-page="tools">Terminal Tool</a></li>
+                </ul>
+            </nav>
+        </aside>
 
-        <main>
-            <section id="dashboard" class="page active">
-                <h2>System Overview</h2>
-                <div class="stats">
-                    <div class="stat-card">
-                        <h3>Protection Status</h3>
-                        <p id="protection-status">Loading...</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>Expiration</h3>
-                        <p id="expiration-status">Loading...</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>Last Updated</h3>
-                        <p id="last-updated">Loading...</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>Protection Count</h3>
-                        <p id="protection-count">Loading...</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>Update Mode</h3>
-                        <p id="update-mode">Loading...</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>Protection Mode</h3>
-                        <p id="protection-mode">Loading...</p>
-                    </div>
+        <main class="main-content">
+            <header class="top-header">
+                <h2 class="page-title">Workspace</h2>
+                <div class="header-actions">
+                    <button id="reload-btn" class="btn btn-ghost">Reload Config</button>
+                    <button id="restart-btn" class="btn btn-danger">Restart Service</button>
                 </div>
-                <div class="actions">
-                    <button id="reload-btn">Reload Configuration</button>
-                    <button id="restart-btn">Restart Service</button>
-                </div>
-            </section>
+            </header>
 
-            <section id="config" class="page">
-                <h2>Basic Configuration</h2>
-                <div class="editor-container">
-                    <div class="form-group">
-                        <label for="language">Language</label>
-                        <select id="language" name="language" class="language-select">
-                            <option value="">Loading languages...</option>
-                        </select>
+            <div class="content-wrapper">
+                <section id="dashboard" class="page active">
+                    <div class="section-header">
+                        <h3>System Overview</h3>
+                        <p class="subtitle">Real-time telemetry and operational status</p>
                     </div>
-                    <div class="form-group">
-                        <label for="disable">Disable Protection</label>
-                        <select id="disable" name="disable">
-                            <option value="false">False (Enabled)</option>
-                            <option value="true">True (Disabled)</option>
-                        </select>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Protection Status</div>
+                            <div class="stat-value font-mono" id="protection-status">Loading...</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Expiration</div>
+                            <div class="stat-value font-mono" id="expiration-status">Loading...</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Last Updated</div>
+                            <div class="stat-value font-mono" id="last-updated">Loading...</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Protection Count</div>
+                            <div class="stat-value font-mono highlight" id="protection-count">Loading...</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Update Mode</div>
+                            <div class="stat-value font-mono" id="update-mode">Loading...</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Protection Mode</div>
+                            <div class="stat-value font-mono" id="protection-mode">Loading...</div>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="expire_hours">Expire Hours</label>
-                        <input type="number" id="expire_hours" name="expire_hours">
-                    </div>
-                    <div class="form-group">
-                        <label for="update">Auto Update</label>
-                        <select id="update" name="update">
-                            <option value="enable">Enabled</option>
-                            <option value="disable">Disabled</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="mode">Protection Mode</label>
-                        <select id="mode" name="mode">
-                            <option value="Permissive">Permissive</option>
-                            <option value="Enhanced">Enhanced</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="web_ip">Web Server IP</label>
-                        <input type="text" id="web_ip" name="web_ip" placeholder="127.0.0.1">
-                    </div>
-                    <div class="form-group">
-                        <label for="web_port">Web Server Port</label>
-                        <input type="number" id="web_port" name="web_port" placeholder="8080">
-                    </div>
-                    <div class="form-actions">
-                        <button id="save-config">Save Configuration</button>
-                    </div>
-                </div>
-            </section>
+                </section>
 
-            <section id="rules" class="page">
-                <h2>Protection Rules</h2>
+                <section id="config" class="page">
+                    <div class="section-header">
+                        <h3>Basic Configuration</h3>
+                        <p class="subtitle">Core parameters for Deeprotection engine</p>
+                    </div>
+                    <div class="panel">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="language">System Language</label>
+                                <select id="language" name="language" class="language-select">
+                                    <option value="">Loading languages...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="disable">Protection Switch</label>
+                                <select id="disable" name="disable">
+                                    <option value="false">Enabled (Active Defense)</option>
+                                    <option value="true">Disabled (Bypass)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="expire_hours">License Expire Hours</label>
+                                <input type="number" id="expire_hours" name="expire_hours" class="font-mono">
+                            </div>
+                            <div class="form-group">
+                                <label for="update">Auto Update Engine</label>
+                                <select id="update" name="update">
+                                    <option value="enable">Enabled</option>
+                                    <option value="disable">Disabled</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="mode">Protection Mode Level</label>
+                                <select id="mode" name="mode">
+                                    <option value="Permissive">Permissive (Log Only)</option>
+                                    <option value="Enhanced">Enhanced (Block & Log)</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="divider"></div>
+                        <h4 class="sub-heading">Web Service Binding</h4>
+                        
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="web_ip">Web Server IP</label>
+                                <input type="text" id="web_ip" name="web_ip" placeholder="127.0.0.1" class="font-mono">
+                            </div>
+                            <div class="form-group">
+                                <label for="web_port">Web Server Port</label>
+                                <input type="number" id="web_port" name="web_port" placeholder="8080" class="font-mono">
+                            </div>
+                        </div>
+                        
+                        <div class="form-actions right-align">
+                            <button id="save-config" class="btn btn-primary">Commit Configuration</button>
+                        </div>
+                    </div>
+                </section>
 
-                <div class="rules-section">
-                    <h3>Protected Paths</h3>
-                    <div class="rules-info">
-                        <p>List of protected paths (one per line):</p>
+                <section id="rules" class="page">
+                    <div class="section-header">
+                        <h3>Protection Rules</h3>
+                        <p class="subtitle">Define access control and command interception policies</p>
+                    </div>
+                    
+                    <div class="panel rules-section">
+                        <div class="rules-header">
+                            <h4>Protected Paths List</h4>
+                            <span class="badge">Directory Access Control</span>
+                        </div>
+                        
+                        <div class="table-container">
+                            <table id="pathsTable" class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th class="number-cell">SEQ</th>
+                                        <th>PATH DIRECTIVE</th>
+                                        <th class="action-cell">ACTION</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="protectedPathsBody">
+                                    <tr>
+                                        <td class="number-cell">1.</td>
+                                        <td class="path-cell">
+                                            <input type="text" class="path-input font-mono" placeholder="e.g., /var/www/html/secure">
+                                        </td>
+                                        <td class="action-cell">
+                                            <button class="action-btn add-btn btn-sm">Add Rule</button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
 
-                    <div class="table-container">
-                        <table id="pathsTable">
-                            <thead>
-                                <tr>
-                                    <th class="number-cell">#</th>
-                                    <th>Path Rule</th>
-                                    <th class="action-cell">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="protectedPathsBody">
-                                <tr>
-                                    <td class="number-cell">1.</td>
-                                    <td class="path-cell">
-                                        <input type="text" class="path-input" placeholder="Enter a path rule">
-                                    </td>
-                                    <td class="action-cell">
-                                        <button class="action-btn add-btn">Add</button>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                    <div class="panel rules-section mt-4">
+                        <div class="rules-header">
+                            <h4>Command Intercept Rules</h4>
+                            <span class="badge">Execution Control</span>
+                        </div>
+                        <p class="hint-text">Format syntax mapping: <code class="font-mono">original_command &gt; replacement_command</code></p>
 
-                <div class="rules-section">
-                    <h3>Command Intercept Rules</h3>
-                    <div class="rules-info">
-                        <p>Command patterns and their replacements:</p>
-                        <p class="hint">Format: <code>original_command > replacement_command</code></p>
+                        <div class="table-container">
+                            <table id="transformTable" class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th class="number-cell">SEQ</th>
+                                        <th>ORIGINAL VECTOR</th>
+                                        <th class="arrow-cell">MAP</th>
+                                        <th>REPLACEMENT VECTOR</th>
+                                        <th class="action-cell">ACTION</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="commandRulesBody">
+                                    <tr>
+                                        <td class="number-cell">1</td>
+                                        <td>
+                                            <input type="text" class="original-input font-mono" placeholder="Original command">
+                                            <div class="error-message">Vector cannot be empty</div>
+                                        </td>
+                                        <td class="arrow-cell font-mono">&gt;</td>
+                                        <td><input type="text" class="replace-input font-mono" placeholder="Sanitized command"></td>
+                                        <td class="action-cell">
+                                            <button class="action-btn add-btn btn-sm">Add Rule</button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <div class="form-actions mt-4">
+                            <button id="save-rules" class="btn btn-primary">Commit Rules Policies</button>
+                        </div>
                     </div>
+                </section>
 
-                    <div class="table-container">
-                        <table id="transformTable">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Original</th>
-                                    <th class="arrow-cell">-></th>
-                                    <th>Replace</th>
-                                    <th class="action-cell">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="commandRulesBody">
-                                <tr>
-                                    <td>1</td>
-                                    <td>
-                                        <input type="text" class="original-input" placeholder="Original">
-                                        <div class="error-message">Original cannot be empty</div>
-                                    </td>
-                                    <td class="arrow-cell">></td>
-                                    <td><input type="text" class="replace-input" placeholder="Replace"></td>
-                                    <td class="action-cell">
-                                        <button class="add-btn">Add</button>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                <section id="logs" class="page">
+                    <div class="section-header">
+                        <h3>Security Audit Logs</h3>
+                        <p class="subtitle">Live streaming telemetry and engine events</p>
                     </div>
-                </div>
-
-                <div class="form-actions">
-                    <button id="save-rules">Save Rules</button>
-                </div>
-            </section>
-
-            <section id="logs" class="page">
-                <h2>Live Logs</h2>
-                <div class="log-controls">
-                    <button id="pause-logs">Pause</button>
-                    <button id="clear-logs">Clear</button>
-                </div>
-                <div class="log-container">
-                    <pre id="log-output"></pre>
-                </div>
-            </section>
-
-            <section id="tools" class="page">
-                <h2>Terminal</h2>
-                <div class="tool">
-                    <h3>Execute Command</h3>
-                    <div class="command-input">
-                        <input type="text" id="command" placeholder="Enter command...">
-                        <button id="execute-btn">Execute</button>
+                    <div class="panel console-panel">
+                        <div class="log-controls">
+                            <div class="console-status"><span class="pulse-dot"></span> Live Stream Active</div>
+                            <div class="btn-group">
+                                <button id="pause-logs" class="btn btn-sm btn-ghost">Pause Stream</button>
+                                <button id="clear-logs" class="btn btn-sm btn-ghost">Clear Buffer</button>
+                            </div>
+                        </div>
+                        <div class="log-container">
+                            <pre id="log-output" class="font-mono"></pre>
+                        </div>
                     </div>
-                    <div class="command-output">
-                        <pre id="command-output"></pre>
+                </section>
+
+                <section id="tools" class="page">
+                    <div class="section-header">
+                        <h3>Interactive Terminal</h3>
+                        <p class="subtitle">Direct shell access to host environment</p>
                     </div>
-                </div>
-            </section>
+                    <div class="panel terminal-panel">
+                        <div class="command-input-group">
+                            <span class="prompt-symbol font-mono">root@system:~#</span>
+                            <input type="text" id="command" class="font-mono" placeholder="Enter shell command..." autocomplete="off" spellcheck="false">
+                            <button id="execute-btn" class="btn btn-primary">EXECUTE</button>
+                        </div>
+                        <div class="command-output-container mt-4">
+                            <div class="output-header">Standard Output Buffer</div>
+                            <pre id="command-output" class="font-mono"></pre>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <footer>
+                <p class="copyright">Deeprotection Security Framework © 2025-%year% Geekstrange. All Systems Operational.</p>
+            </footer>
         </main>
-
-        <footer>
-            <p class="copyright">Copyright © 2025-%year% Geekstrange. All rights reserved.</p>
-            </p>
-        </footer>
     </div>
 
     <script src="/static/js/app.js"></script>
 </body>
-
 </html>

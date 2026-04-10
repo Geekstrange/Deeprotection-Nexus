@@ -165,23 +165,23 @@ document.addEventListener('DOMContentLoaded', function() {
         const protectionMode = document.getElementById('protection-mode');
 
         if (!config || !config.basic) {
-            statusIndicator.className = '';
-            statusText.textContent = 'Error loading status';
+            statusIndicator.className = 'status-dot';
+            statusText.textContent = 'ERROR LOADING STATUS';
             return;
         }
 
         const basic = config.basic;
 
         if (basic.disable === 'false') {
-            statusIndicator.className = 'status-active';
-            statusText.textContent = 'Active';
+            statusIndicator.className = 'status-dot status-active';
+            statusText.textContent = 'SYSTEM ACTIVE';
             protectionStatus.textContent = 'Enabled';
-            protectionStatus.style.color = '#27ae60';
+            protectionStatus.style.color = '#10b981'; // 新深色主题绿色
         } else {
-            statusIndicator.className = '';
-            statusText.textContent = 'Disabled';
+            statusIndicator.className = 'status-dot';
+            statusText.textContent = 'SYSTEM DISABLED';
             protectionStatus.textContent = 'Disabled';
-            protectionStatus.style.color = '#e74c3c';
+            protectionStatus.style.color = '#ef4444'; // 新深色主题红色
         }
 
         lastUpdated.textContent = new Date(parseInt(basic.timestamp) * 1000).toLocaleString();
@@ -197,10 +197,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (stats.remaining_time) {
             expirationStatus.textContent = stats.remaining_time;
-            expirationStatus.style.color = '#e74c3c';
+            expirationStatus.style.color = '#ef4444';
         } else {
             expirationStatus.textContent = currentConfig.basic.expire_hours + ' hours (default)';
-            expirationStatus.style.color = '#27ae60';
+            expirationStatus.style.color = '#10b981';
         }
     }
 
@@ -234,10 +234,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 row.innerHTML = `
                 <td class="number-cell">${index + 1}.</td>
                 <td class="path-cell">
-                    <input type="text" class="path-input confirmed" value="${path}" readonly>
+                    <input type="text" class="path-input confirmed font-mono" value="${path}" readonly>
                 </td>
                 <td class="action-cell">
-                    <button class="action-btn remove-btn">Remove</button>
+                    <button class="action-btn remove-btn btn-sm">Remove</button>
                 </td>
             `;
                 document.getElementById('protectedPathsBody').appendChild(row);
@@ -249,10 +249,10 @@ document.addEventListener('DOMContentLoaded', function() {
         emptyPathRow.innerHTML = `
         <td class="number-cell">${(config.protected_paths?.length || 0) + 1}.</td>
         <td class="path-cell">
-            <input type="text" class="path-input" placeholder="Enter a path rule">
+            <input type="text" class="path-input font-mono" placeholder="Enter a path rule">
         </td>
         <td class="action-cell">
-            <button class="action-btn add-btn">Add</button>
+            <button class="action-btn add-btn btn-sm">Add Rule</button>
         </td>
     `;
         document.getElementById('protectedPathsBody').appendChild(emptyPathRow);
@@ -268,14 +268,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 const row = document.createElement('tr');
                 row.classList.add('confirmed');
                 row.innerHTML = `
-                <td>${index + 1}</td>
+                <td class="number-cell">${index + 1}</td>
                 <td>
-                    <input type="text" class="original-input" value="${original || ''}" readonly>
+                    <input type="text" class="original-input font-mono" value="${original || ''}" readonly>
                 </td>
-                <td class="arrow-cell">></td>
-                <td><input type="text" class="replace-input" value="${replacement || ''}" readonly></td>
+                <td class="arrow-cell font-mono">&gt;</td>
+                <td><input type="text" class="replace-input font-mono" value="${replacement || ''}" readonly></td>
                 <td class="action-cell">
-                    <button class="remove-btn">Remove</button>
+                    <button class="action-btn remove-btn btn-sm">Remove</button>
                 </td>
             `;
                 document.getElementById('commandRulesBody').appendChild(row);
@@ -285,15 +285,15 @@ document.addEventListener('DOMContentLoaded', function() {
         // 添加一个空行用于新输入
         const emptyCommandRow = document.createElement('tr');
         emptyCommandRow.innerHTML = `
-        <td>${(config.command_rules?.length || 0) + 1}</td>
+        <td class="number-cell">${(config.command_rules?.length || 0) + 1}</td>
         <td>
-            <input type="text" class="original-input" placeholder="Original">
-            <div class="error-message">Original cannot be empty</div>
+            <input type="text" class="original-input font-mono" placeholder="Original command">
+            <div class="error-message">Vector cannot be empty</div>
         </td>
-        <td class="arrow-cell">></td>
-        <td><input type="text" class="replace-input" placeholder="Replace"></td>
+        <td class="arrow-cell font-mono">&gt;</td>
+        <td><input type="text" class="replace-input font-mono" placeholder="Sanitized command"></td>
         <td class="action-cell">
-            <button class="add-btn">Add</button>
+            <button class="action-btn add-btn btn-sm">Add Rule</button>
         </td>
     `;
         document.getElementById('commandRulesBody').appendChild(emptyCommandRow);
@@ -393,12 +393,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const result = await updateConfig(configData);
             if (result) {
-                showNotification('Rules saved');
+                showNotification('Rules policies committed successfully');
             }
         });
     }
 
-    // 修复后的初始化保护路径表格
+    // 初始化保护路径表格
     function initProtectedPathsTable() {
         const tableBody = document.getElementById('protectedPathsBody');
 
@@ -427,40 +427,31 @@ document.addEventListener('DOMContentLoaded', function() {
         function addNewEmptyRow() {
             const newRow = document.createElement('tr');
 
-            // 序号单元格
             const numberCell = document.createElement('td');
             numberCell.className = 'number-cell';
             numberCell.textContent = `${tableBody.querySelectorAll('tr').length + 1}.`;
 
-            // 路径内容单元格
             const pathCell = document.createElement('td');
             pathCell.className = 'path-cell';
             const input = document.createElement('input');
             input.type = 'text';
-            input.className = 'path-input';
-            input.placeholder = 'Enter a path rule';
+            input.className = 'path-input font-mono';
+            input.placeholder = 'e.g., /var/www/html/secure';
             pathCell.appendChild(input);
 
-            // 操作单元格 (添加按钮)
             const actionCell = document.createElement('td');
             actionCell.className = 'action-cell';
             const button = document.createElement('button');
-            button.className = 'action-btn add-btn';
-            button.textContent = 'Add';
+            button.className = 'action-btn add-btn btn-sm';
+            button.textContent = 'Add Rule';
             actionCell.appendChild(button);
 
-            // 组装行
             newRow.appendChild(numberCell);
             newRow.appendChild(pathCell);
             newRow.appendChild(actionCell);
 
-            // 添加到表格容器
             tableBody.appendChild(newRow);
-
-            // 绑定事件
             setupRowEvents(newRow);
-
-            // 更新行号
             updateRowNumbers();
         }
 
@@ -469,36 +460,29 @@ document.addEventListener('DOMContentLoaded', function() {
             const input = row.querySelector('.path-input');
             let button = row.querySelector('.action-btn');
 
-            // 移除之前的事件监听器, 防止重复绑定
             if (button) {
                 const newButton = button.cloneNode(true);
                 button.parentNode.replaceChild(newButton, button);
                 button = newButton;
             }
 
-            // 按钮点击事件处理
             button.addEventListener('click', function() {
                 const content = input.value.trim();
 
                 if (button.classList.contains('add-btn')) {
-                    // 处理Add操作
                     if (content) {
-                        // 锁定输入框样式
                         input.classList.add('confirmed');
                         input.readOnly = true;
 
-                        // 变为Remove按钮
                         button.classList.remove('add-btn');
                         button.classList.add('remove-btn');
                         button.textContent = 'Remove';
 
-                        // 添加新行
                         addNewEmptyRow();
                     } else {
                         alert('Please enter a path rule before adding');
                     }
                 } else {
-                    // 处理Remove操作
                     row.remove();
                     updateRowNumbers();
                     if (!hasEmptyRow()) {
@@ -508,13 +492,11 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        // 初始化已有行
         const existingRows = tableBody.querySelectorAll('tr');
         existingRows.forEach(r => {
             setupRowEvents(r);
         });
 
-        // 确保有一个空行
         if (!hasEmptyRow()) {
             addNewEmptyRow();
         }
@@ -524,18 +506,16 @@ document.addEventListener('DOMContentLoaded', function() {
     function initCommandRulesTable() {
         const tableBody = document.getElementById('commandRulesBody');
 
-        // 重排行号
         function updateRowNumbers() {
             const rows = tableBody.querySelectorAll('tr');
             rows.forEach((row, idx) => {
-                const numCell = row.querySelector('td');
+                const numCell = row.querySelector('.number-cell');
                 if (numCell) {
                     numCell.textContent = idx + 1;
                 }
             });
         }
 
-        // 检查是否存在空白 (即还没添加的)行
         function hasEmptyCommandRow() {
             const rows = tableBody.querySelectorAll('tr');
             for (const row of rows) {
@@ -546,59 +526,51 @@ document.addEventListener('DOMContentLoaded', function() {
             return false;
         }
 
-        // 创建并绑定一个新的空行
         function addEmptyRow() {
             const index = tableBody.querySelectorAll('tr').length + 1;
             const row = document.createElement('tr');
             row.innerHTML = `
-            <td>${index}</td>
+            <td class="number-cell">${index}</td>
             <td>
-                <input type="text" class="original-input" placeholder="Original">
-                <div class="error-message">Original cannot be empty</div>
+                <input type="text" class="original-input font-mono" placeholder="Original command">
+                <div class="error-message">Vector cannot be empty</div>
             </td>
-            <td class="arrow-cell">></td>
-            <td><input type="text" class="replace-input" placeholder="Replace"></td>
+            <td class="arrow-cell font-mono">&gt;</td>
+            <td><input type="text" class="replace-input font-mono" placeholder="Sanitized command"></td>
             <td class="action-cell">
-                <button class="add-btn">Add</button>
+                <button class="action-btn add-btn btn-sm">Add Rule</button>
             </td>
         `;
             tableBody.appendChild(row);
             setupRowEvents(row);
         }
 
-        // 设置单行事件
         function setupRowEvents(row) {
             const originalInput = row.querySelector('.original-input');
             const replaceInput = row.querySelector('.replace-input');
             const button = row.querySelector('button');
             const errorMessage = row.querySelector('.error-message');
 
-            // 按钮点击事件处理 (Add / Remove)
             button.addEventListener('click', function() {
                 if (button.classList.contains('add-btn')) {
-                    // Add 操作
                     if (!originalInput.value.trim()) {
                         originalInput.classList.add('original-required');
                         errorMessage.style.display = 'block';
                         return;
                     }
 
-                    // 锁定输入框并标记已确认
                     row.classList.add('confirmed');
                     originalInput.readOnly = true;
                     replaceInput.readOnly = true;
 
-                    // 替换按钮状态
                     button.classList.remove('add-btn');
                     button.classList.add('remove-btn');
                     button.textContent = 'Remove';
 
-                    // 添加新空行 (如果当前已经没有空行)
                     if (!hasEmptyCommandRow()) {
                         addEmptyRow();
                     }
                 } else {
-                    // Remove 操作
                     row.remove();
                     updateRowNumbers();
                     if (!hasEmptyCommandRow()) {
@@ -607,7 +579,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
 
-            // 输入变化处理: 仅用于清除错误样式
             originalInput.addEventListener('input', function() {
                 if (this.value.trim()) {
                     this.classList.remove('original-required');
@@ -616,7 +587,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        // 初始化已有行 (包括历史加载的 confirmed 规则)和确保有一个空行
         const existingRows = tableBody.querySelectorAll('tr');
         existingRows.forEach(r => {
             setupRowEvents(r);
@@ -626,7 +596,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // 从保护路径表格获取数据
     function getProtectedPaths() {
         const paths = [];
         const rows = document.querySelectorAll('#protectedPathsBody tr');
@@ -641,7 +610,6 @@ document.addEventListener('DOMContentLoaded', function() {
         return paths;
     }
 
-    // 从命令拦截规则表格获取数据
     function getCommandRules() {
         const rules = [];
         const rows = document.querySelectorAll('#commandRulesBody tr');
@@ -653,7 +621,6 @@ document.addEventListener('DOMContentLoaded', function() {
             if (originalInput && originalInput.value.trim()) {
                 const original = originalInput.value.trim();
                 const replacement = replaceInput.value.trim();
-                // If replacement is empty, use '>' without duplicating original
                 const rule = replacement ? `${original} > ${replacement}` : `${original} >`;
                 rules.push(rule);
             }
@@ -662,14 +629,12 @@ document.addEventListener('DOMContentLoaded', function() {
         return rules;
     }
 
-    // 播放提示音函数
     function playNotificationSound() {
         try {
             const audio = new Audio('/msg.mp3');
-            audio.volume = 0.5; // 设置音量为50%
+            audio.volume = 0.5;
             audio.play().catch(error => {
                 console.log('Notification playback failed:', error);
-                // 播放失败时不做处理, 避免影响主要功能
             });
         } catch (error) {
             console.log('Notification initialization failed:', error);
@@ -682,10 +647,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const pauseBtn = document.getElementById('pause-logs');
         const clearBtn = document.getElementById('clear-logs');
         let paused = false;
-        // 记录日志流连接建立的时间, 用于过滤历史日志
         const logStreamStartTime = new Date();
 
-        // 日志流 - 监听 "log" 事件
         const eventSource = new EventSource('/api/logs');
 
         eventSource.addEventListener('log', function(event) {
@@ -694,23 +657,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 logOutput.textContent += event.data + '\n';
                 logOutput.scrollTop = logOutput.scrollHeight;
 
-                // 解析日志中的时间戳 (格式: 2025-08-04 13:55:21)
                 const logTimeStr = event.data.substring(0, 19).trim();
                 const logTime = new Date(logTimeStr);
 
-                // 只对页面加载后生成的日志显示通知
                 if (logTime >= logStreamStartTime) {
                     showLogNotification(event.data);
-                    playNotificationSound(); // 播放提示音
+                    playNotificationSound();
                 }
             }
         });
 
-        // 添加日志通知函数
         function showLogNotification(message) {
             const container = document.getElementById('notificationContainer');
 
-            // 如果容器不存在则创建
             if (!container) {
                 const containerDiv = document.createElement('div');
                 containerDiv.id = 'notificationContainer';
@@ -727,12 +686,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
             document.getElementById('notificationContainer').appendChild(notification);
 
-            // 添加动画类
             setTimeout(() => {
-                notification.style.animation = 'slideIn 0.5s forwards, fadeOut 0.5s forwards 4.5s';
+                notification.style.animation = 'slideIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards, fadeOut 0.4s ease forwards 4.6s';
             }, 10);
 
-            // 5秒后自动移除
             setTimeout(() => {
                 if (notification.parentNode) {
                     notification.remove();
@@ -741,13 +698,15 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         eventSource.addEventListener('error', function(event) {
-            logOutput.textContent += '[ERROR] ' + event.data + '\n';
+            logOutput.textContent += '[SYSTEM ERROR] ' + event.data + '\n';
             logOutput.scrollTop = logOutput.scrollHeight;
         });
 
         pauseBtn.addEventListener('click', function() {
             paused = !paused;
-            this.textContent = paused ? 'Resume' : 'Pause';
+            this.textContent = paused ? 'Resume Stream' : 'Pause Stream';
+            this.classList.toggle('btn-ghost');
+            this.classList.toggle('btn-primary');
         });
 
         clearBtn.addEventListener('click', function() {
@@ -762,20 +721,15 @@ document.addEventListener('DOMContentLoaded', function() {
         const commandOutput = document.getElementById('command-output');
         const toolsPage = document.getElementById('tools');
 
-        // 创建并显示警告横幅
         function showWarningBanner() {
-            // 检查横幅是否已存在
             if (document.querySelector('.warning-banner')) return;
 
-            // 创建横幅元素
             const banner = document.createElement('div');
             banner.className = 'warning-banner blinking';
-            banner.innerHTML = '<span>[ ! ] WARNING:This is the native shell.</span>';
+            banner.innerHTML = '<span>[CRITICAL] CAUTION: NATIVE HOST SHELL ENVIRONMENT ACTIVE.</span>';
 
-            // 添加到页面
             document.body.prepend(banner);
 
-            // 5秒后自动关闭
             setTimeout(() => {
                 if (banner && banner.style.display !== 'none') {
                     banner.style.transition = 'opacity 0.5s ease';
@@ -789,7 +743,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 5000);
         }
 
-        // 监听Terminal页面激活状态变化
         const observer = new MutationObserver((mutations) => {
             mutations.forEach(mutation => {
                 if (mutation.attributeName === 'class') {
@@ -800,23 +753,23 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
 
-        // 观察页面是否被激活
         observer.observe(toolsPage, {
             attributes: true
         });
 
-        // 初始加载时如果Terminal是激活状态, 显示横幅
         if (toolsPage.classList.contains('active')) {
             showWarningBanner();
         }
 
-        // 原有命令执行逻辑保持不变
         executeBtn.addEventListener('click', async function() {
             if (!commandInput.value.trim()) return;
-
+            
+            commandOutput.textContent = 'Executing...';
             const result = await executeCommand(commandInput.value);
             if (result) {
                 commandOutput.textContent = result.output;
+            } else {
+                commandOutput.textContent = 'Execution failed or timeout.';
             }
         });
 
@@ -848,16 +801,18 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('reload-btn').addEventListener('click', async function() {
         const result = await reloadService();
         if (result) {
-            showNotification('Configuration reloaded');
+            showNotification('Engine configuration reloaded successfully');
             initDashboard();
         }
     });
 
     document.getElementById('restart-btn').addEventListener('click', async function() {
-        const result = await restartService();
-        if (result) {
-            showNotification('Service restarted');
-            initDashboard();
+        if(confirm("WARNING: This will momentarily interrupt protection services. Proceed?")) {
+            const result = await restartService();
+            if (result) {
+                showNotification('Protection service restarted');
+                initDashboard();
+            }
         }
     });
 });
