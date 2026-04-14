@@ -1,4 +1,4 @@
-# Deeprotection WebGUI
+# Deeprotection Nexus
 
 Deeprotection WebGUI is a web interface tool for managing Deeprotection. It offers an intuitive interface for configuring protection rules, viewing system status and logs, etc.
 
