@@ -1,6 +1,6 @@
 # Deeprotection Nexus
 
-Deeprotection WebGUI is a web interface tool for managing Deeprotection. It offers an intuitive interface for configuring protection rules, viewing system status and logs, etc.
+Deeprotection Nexus is the next‑generation web management platform for the Deeprotection security suite. It is far more than a simple GUI — it is a multi‑function aggregation control center that unifies monitoring, configuration, policy management, log auditing, and task scheduling into a single cockpit.
 
 ## Features
 
@@ -36,26 +36,21 @@ Execute system commands for debugging and management.
 
 ---
 
-5. Open a browser and visit `http://127.0.0.1:8080` (default address, modifiable in settings).
+5. Run ./dn -host 127.0.0.1-port 8080
 
 ## Configuration File
 
-The configuration file is located at `/etc/deeprotection/deeprotection.conf` and includes:
+The configuration file is located at `/etc/deeprotection/config.toml` and includes:
 
-- `web_ip`: The IP address the web service binds to.
-- `web_port`: The port the web service listens on.
 - `language`: UI language setting.
-- `disable`: Whether to disable protection.
-- `expire_hours`: Protection disable expiration time (in hours).
-- `update`: Whether to enable auto-update.
-- `mode`: Protection mode (Permissive/Enhanced).
+- `mode`: Protection mode (disable / permissive / Enforcing).
 
 It also contains the list of protected paths and command interception rules.
 
 ## Logs
 
-System logs are stored in `/var/log/deeprotection.log` and can be viewed in real time via the "Logs" page in the web interface.
+System logs are stored in `/var/log/dp.log` and can be viewed in real time via the "Log Viewing" page in the web interface.
 
 ## License
 
-This project is under the Apache License 2.0. See the [LICENSE](https://github.com/Geekstrange/Deeprotection-WebGUI?tab=Apache-2.0-1-ov-file) file for details.
+This project is under the Apache License 2.0. See the [LICENSE](https://github.com/Geekstrange/Deeprotection-Nexus?tab=Apache-2.0-1-ov-file) file for details.
