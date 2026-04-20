@@ -1,37 +1,68 @@
-document.addEventListener('DOMContentLoaded', function() {
-    // 全局变量
-    let currentConfig = null;
+document.addEventListener('DOMContentLoaded', function () {
+    // ============================================================
+    // Auth guard — redirect to /login if not authenticated
+    // ============================================================
+    (async function checkAuth() {
+        try {
+            const res = await fetch('/api/auth/status');
+            const data = await res.json();
+            if (!data.authenticated) {
+                window.location.href = '/login';
+            }
+        } catch (_) {
+            window.location.href = '/login';
+        }
+    })();
 
+    // Logout button
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', async function () {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } finally {
+                window.location.href = '/login';
+            }
+        });
+    }
+
+    // ============================================================
+    // State
+    // ============================================================
+    let currentConfig = null;
+    let currentRules = [];
+    let currentPaths = [];
+
+    // ============================================================
     // Navigation
+    // ============================================================
     document.querySelectorAll('nav a').forEach(link => {
-        link.addEventListener('click', function(e) {
+        link.addEventListener('click', function (e) {
             e.preventDefault();
-            document.querySelectorAll('.page').forEach(page => {
-                page.classList.remove('active');
-            });
-            document.querySelectorAll('nav a').forEach(a => {
-                a.classList.remove('active');
-            });
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
             this.classList.add('active');
             document.getElementById(this.dataset.page).classList.add('active');
         });
     });
 
-    // Copyright info
-    document.querySelector('.copyright').textContent = document.querySelector('.copyright').textContent.replace('%year%', new Date().getFullYear());
+    const copyright = document.querySelector('.copyright');
+    if (copyright) {
+        copyright.textContent = copyright.textContent.replace('%year%', new Date().getFullYear());
+    }
 
-    // API functions
+    // ============================================================
+    // API helpers
+    // ============================================================
+
     async function fetchConfig() {
         try {
-            const response = await fetch('/api/config');
-
-            if (!response.ok) {
-                throw new Error('Failed to fetch configuration');
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Error fetching config:', error);
+            const res = await fetch('/api/config');
+            if (res.status === 401) { window.location.href = '/login'; return null; }
+            if (!res.ok) throw new Error('Failed to fetch configuration');
+            return await res.json();
+        } catch (err) {
+            console.error('Error fetching config:', err);
             showNotification('Error loading configuration', 'error');
             return null;
         }
@@ -39,780 +70,760 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function fetchStats() {
         try {
-            const response = await fetch('/api/stats');
-
-            if (!response.ok) {
-                throw new Error('Failed to fetch stats');
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Error fetching stats:', error);
+            const res = await fetch('/api/stats');
+            if (res.status === 401) { window.location.href = '/login'; return null; }
+            if (!res.ok) throw new Error('Failed to fetch stats');
+            return await res.json();
+        } catch (err) {
+            console.error('Error fetching stats:', err);
             return null;
         }
     }
 
-    async function fetchLanguages() {
+    async function updateBasicConfig(config) {
         try {
-            const response = await fetch('/api/languages');
-
-            if (!response.ok) {
-                throw new Error('Failed to fetch languages');
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Error fetching languages:', error);
-            showNotification('Error loading languages', 'error');
-            return [];
-        }
-    }
-
-    async function updateConfig(config) {
-        try {
-            const response = await fetch('/api/config', {
+            const res = await fetch('/api/config', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)
             });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Failed to update configuration');
+            if (res.status === 401) { window.location.href = '/login'; return null; }
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || 'Failed to update configuration');
             }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Error updating config:', error);
-            showNotification(error.message, 'error');
+            return await res.json();
+        } catch (err) {
+            console.error('Error updating config:', err);
+            showNotification(err.message, 'error');
             return null;
         }
     }
 
-    async function reloadService() {
-        try {
-            const response = await fetch('/api/reload', {
-                method: 'POST'
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Failed to reload service');
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Error reloading service:', error);
-            showNotification(error.message, 'error');
-            return null;
-        }
+    async function apiAddPath(path) {
+        const res = await fetch('/api/protected-paths', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path })
+        });
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to add path');
+        return data;
     }
 
-    async function restartService() {
-        try {
-            const response = await fetch('/api/restart', {
-                method: 'POST'
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Failed to restart service');
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Error restarting service:', error);
-            showNotification(error.message, 'error');
-            return null;
-        }
+    async function apiDeletePath(path) {
+        const res = await fetch(`/api/protected-paths?path=${encodeURIComponent(path)}`, {
+            method: 'DELETE'
+        });
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to delete path');
+        return data;
     }
 
-    async function executeCommand(command) {
-        try {
-            const response = await fetch('/api/command', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    command
-                })
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Command execution failed');
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Error executing command:', error);
-            showNotification(error.message, 'error');
-            return null;
-        }
+    async function apiAddRule(input) {
+        const res = await fetch('/api/command-rules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(input)
+        });
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to add rule');
+        return data;
     }
 
-    // UI functions
+    async function apiPatchRule(id, patch) {
+        const res = await fetch(`/api/command-rules/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch)
+        });
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to update rule');
+        return data;
+    }
+
+    async function apiDeleteRule(id) {
+        const res = await fetch(`/api/command-rules/${id}`, { method: 'DELETE' });
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to delete rule');
+        return data;
+    }
+
+    // ============================================================
+    // UI helpers
+    // ============================================================
+
+    function showNotification(message, type = 'success') {
+        if (type === 'error') Toast.error(message);
+        else if (type === 'warning') Toast.warning(message);
+        else Toast.success(message);
+    }
+
     function updateStatus(config) {
-        const statusIndicator = document.getElementById('status-indicator');
-        const statusText = document.getElementById('status-text');
-        const protectionStatus = document.getElementById('protection-status');
-        const expirationStatus = document.getElementById('expiration-status');
-        const lastUpdated = document.getElementById('last-updated');
-        const updateMode = document.getElementById('update-mode');
-        const protectionMode = document.getElementById('protection-mode');
-
+        const dot = document.getElementById('status-indicator');
+        const text = document.getElementById('status-text');
         if (!config || !config.basic) {
-            statusIndicator.className = 'status-dot';
-            statusText.textContent = 'ERROR LOADING STATUS';
+            if (dot) dot.className = 'status-dot';
+            if (text) text.textContent = 'ERROR LOADING STATUS';
             return;
         }
-
-        const basic = config.basic;
-
-        if (basic.disable === 'false') {
-            statusIndicator.className = 'status-dot status-active';
-            statusText.textContent = 'SYSTEM ACTIVE';
-            protectionStatus.textContent = 'Enabled';
-            protectionStatus.style.color = '#10b981'; // 新深色主题绿色
-        } else {
-            statusIndicator.className = 'status-dot';
-            statusText.textContent = 'SYSTEM DISABLED';
-            protectionStatus.textContent = 'Disabled';
-            protectionStatus.style.color = '#ef4444'; // 新深色主题红色
-        }
-
-        lastUpdated.textContent = new Date(parseInt(basic.timestamp) * 1000).toLocaleString();
-        updateMode.textContent = basic.update === 'enable' ? 'Enabled' : 'Disabled';
-        protectionMode.textContent = basic.mode || 'Permissive';
+        if (dot) dot.className = 'status-dot status-active';
+        if (text) text.textContent = 'SYSTEM ACTIVE';
     }
 
     function updateStats(stats) {
-        const protectionCount = document.getElementById('protection-count');
-        const expirationStatus = document.getElementById('expiration-status');
-
-        protectionCount.textContent = stats.protection_count;
-
-        if (stats.remaining_time) {
-            expirationStatus.textContent = stats.remaining_time;
-            expirationStatus.style.color = '#ef4444';
-        } else {
-            expirationStatus.textContent = currentConfig.basic.expire_hours + ' hours (default)';
-            expirationStatus.style.color = '#10b981';
-        }
+        const el = document.getElementById('log-count');
+        if (el) el.textContent = stats.protection_count;
     }
 
-    function loadConfigToForm(config) {
-        if (!config || !config.basic) return;
-
-        const basic = config.basic;
-
-        document.getElementById('language').value = basic.language || '';
-        document.getElementById('disable').value = basic.disable || 'false';
-        document.getElementById('expire_hours').value = basic.expire_hours || '24';
-        document.getElementById('update').value = basic.update || 'enable';
-        document.getElementById('mode').value = basic.mode || 'Permissive';
-        document.getElementById('web_ip').value = basic.web_ip || '127.0.0.1';
-        document.getElementById('web_port').value = basic.web_port || '8080';
+    function setModeSelectValue(mode) {
+        const select = document.getElementById('mode-select');
+        if (!select) return;
+        const modeLower = mode ? mode.toLowerCase() : 'permissive';
+        const option = Array.from(select.options).find(o => o.value.toLowerCase() === modeLower);
+        select.value = option ? option.value : 'permissive';
     }
 
-    function loadRulesToForm(config) {
-        if (!config) return;
-
-        // 清空现有表格数据
-        document.getElementById('protectedPathsBody').innerHTML = '';
-        document.getElementById('commandRulesBody').innerHTML = '';
-
-        // 加载保护路径
-        if (config.protected_paths) {
-            config.protected_paths.forEach((path, index) => {
-                if (!path) return;
-
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                <td class="number-cell">${index + 1}.</td>
-                <td class="path-cell">
-                    <input type="text" class="path-input confirmed font-mono" value="${path}" readonly>
-                </td>
-                <td class="action-cell">
-                    <button class="action-btn remove-btn btn-sm">Remove</button>
-                </td>
-            `;
-                document.getElementById('protectedPathsBody').appendChild(row);
-            });
-        }
-
-        // 添加一个空行用于新输入
-        const emptyPathRow = document.createElement('tr');
-        emptyPathRow.innerHTML = `
-        <td class="number-cell">${(config.protected_paths?.length || 0) + 1}.</td>
-        <td class="path-cell">
-            <input type="text" class="path-input font-mono" placeholder="Enter a path rule">
-        </td>
-        <td class="action-cell">
-            <button class="action-btn add-btn btn-sm">Add Rule</button>
-        </td>
-    `;
-        document.getElementById('protectedPathsBody').appendChild(emptyPathRow);
-        initProtectedPathsTable();
-
-        // 加载命令拦截规则
-        if (config.command_rules) {
-            config.command_rules.forEach((rule, index) => {
-                if (!rule) return;
-
-                const [original, replacement] = rule.split('>').map(s => s.trim());
-
-                const row = document.createElement('tr');
-                row.classList.add('confirmed');
-                row.innerHTML = `
-                <td class="number-cell">${index + 1}</td>
-                <td>
-                    <input type="text" class="original-input font-mono" value="${original || ''}" readonly>
-                </td>
-                <td class="arrow-cell font-mono">&gt;</td>
-                <td><input type="text" class="replace-input font-mono" value="${replacement || ''}" readonly></td>
-                <td class="action-cell">
-                    <button class="action-btn remove-btn btn-sm">Remove</button>
-                </td>
-            `;
-                document.getElementById('commandRulesBody').appendChild(row);
-            });
-        }
-
-        // 添加一个空行用于新输入
-        const emptyCommandRow = document.createElement('tr');
-        emptyCommandRow.innerHTML = `
-        <td class="number-cell">${(config.command_rules?.length || 0) + 1}</td>
-        <td>
-            <input type="text" class="original-input font-mono" placeholder="Original command">
-            <div class="error-message">Vector cannot be empty</div>
-        </td>
-        <td class="arrow-cell font-mono">&gt;</td>
-        <td><input type="text" class="replace-input font-mono" placeholder="Sanitized command"></td>
-        <td class="action-cell">
-            <button class="action-btn add-btn btn-sm">Add Rule</button>
-        </td>
-    `;
-        document.getElementById('commandRulesBody').appendChild(emptyCommandRow);
-        initCommandRulesTable();
+    function escapeHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
     }
 
-    function populateLanguageSelect(languages) {
-        const select = document.getElementById('language');
-        select.innerHTML = '';
-
-        languages.forEach(lang => {
-            const option = document.createElement('option');
-            option.value = lang.code;
-            option.textContent = lang.name;
-            select.appendChild(option);
-        });
-
-        fetchConfig().then(config => {
-            if (config && config.basic && config.basic.language) {
-                select.value = config.basic.language;
-            }
-        });
+    function escapeAttr(str) {
+        return String(str).replace(/"/g, '&quot;');
     }
 
-    function showNotification(message, type = 'success') {
-        alert(`${type.toUpperCase()}: ${message}`);
-    }
+    // ============================================================
+    // Protected Paths rendering (with inline add row)
+    // ============================================================
 
-    // Initialize dashboard
-    async function initDashboard() {
-        currentConfig = await fetchConfig();
-        updateStatus(currentConfig);
+    function renderProtectedPaths(paths) {
+        const tbody = document.getElementById('protectedPathsBody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
 
-        const stats = await fetchStats();
-        if (stats) {
-            updateStats(stats);
-        }
-    }
-
-    // 配置页面初始化
-    function initConfigPage() {
-        fetchLanguages().then(languages => {
-            populateLanguageSelect(languages);
-        });
-
-        fetchConfig().then(config => {
-            loadConfigToForm(config);
-        });
-
-        document.getElementById('save-config').addEventListener('click', async function() {
-            const basic = {
-                language: document.getElementById('language').value,
-                disable: document.getElementById('disable').value,
-                expire_hours: document.getElementById('expire_hours').value,
-                update: document.getElementById('update').value,
-                mode: document.getElementById('mode').value,
-                web_ip: document.getElementById('web_ip').value,
-                web_port: document.getElementById('web_port').value
-            };
-
-            const configData = {
-                basic: basic
-            };
-
-            const result = await updateConfig(configData);
-            if (result) {
-                showNotification('Configuration saved');
-                currentConfig = await fetchConfig();
-                updateStatus(currentConfig);
-            }
-        });
-    }
-
-    // 规则页面初始化
-    function initRulesPage() {
-        // 初始化保护路径表格
-        initProtectedPathsTable();
-
-        // 初始化命令拦截规则表格
-        initCommandRulesTable();
-
-        // 加载配置到表格
-        fetchConfig().then(config => {
-            if (config) {
-                loadRulesToForm(config);
-            }
-        });
-
-        document.getElementById('save-rules').addEventListener('click', async function() {
-            const protectedPaths = getProtectedPaths();
-            const commandRules = getCommandRules();
-
-            const configData = {
-                protected_paths: protectedPaths,
-                command_rules: commandRules
-            };
-
-            const result = await updateConfig(configData);
-            if (result) {
-                showNotification('Rules policies committed successfully');
-            }
-        });
-    }
-
-    // 初始化保护路径表格
-    function initProtectedPathsTable() {
-        const tableBody = document.getElementById('protectedPathsBody');
-
-        // 重排行号
-        function updateRowNumbers() {
-            const rows = tableBody.querySelectorAll('tr');
-            rows.forEach((row, idx) => {
-                const numCell = row.querySelector('.number-cell');
-                if (numCell) {
-                    numCell.textContent = `${idx + 1}.`;
-                }
-            });
-        }
-
-        // 检查是否有空行 (即等待输入的行)
-        function hasEmptyRow() {
-            return Array.from(tableBody.querySelectorAll('tr')).some(row => {
-                const input = row.querySelector('.path-input');
-                const button = row.querySelector('.action-btn');
-                return !input.classList.contains('confirmed') &&
-                    button.classList.contains('add-btn');
-            });
-        }
-
-        // 创建新的空行
-        function addNewEmptyRow() {
-            const newRow = document.createElement('tr');
-
-            const numberCell = document.createElement('td');
-            numberCell.className = 'number-cell';
-            numberCell.textContent = `${tableBody.querySelectorAll('tr').length + 1}.`;
-
-            const pathCell = document.createElement('td');
-            pathCell.className = 'path-cell';
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'path-input font-mono';
-            input.placeholder = 'e.g., /var/www/html/secure';
-            pathCell.appendChild(input);
-
-            const actionCell = document.createElement('td');
-            actionCell.className = 'action-cell';
-            const button = document.createElement('button');
-            button.className = 'action-btn add-btn btn-sm';
-            button.textContent = 'Add Rule';
-            actionCell.appendChild(button);
-
-            newRow.appendChild(numberCell);
-            newRow.appendChild(pathCell);
-            newRow.appendChild(actionCell);
-
-            tableBody.appendChild(newRow);
-            setupRowEvents(newRow);
-            updateRowNumbers();
-        }
-
-        // 设置行事件处理
-        function setupRowEvents(row) {
-            const input = row.querySelector('.path-input');
-            let button = row.querySelector('.action-btn');
-
-            if (button) {
-                const newButton = button.cloneNode(true);
-                button.parentNode.replaceChild(newButton, button);
-                button = newButton;
-            }
-
-            button.addEventListener('click', function() {
-                const content = input.value.trim();
-
-                if (button.classList.contains('add-btn')) {
-                    if (content) {
-                        input.classList.add('confirmed');
-                        input.readOnly = true;
-
-                        button.classList.remove('add-btn');
-                        button.classList.add('remove-btn');
-                        button.textContent = 'Remove';
-
-                        addNewEmptyRow();
-                    } else {
-                        alert('Please enter a path rule before adding');
-                    }
-                } else {
-                    row.remove();
-                    updateRowNumbers();
-                    if (!hasEmptyRow()) {
-                        addNewEmptyRow();
-                    }
-                }
-            });
-        }
-
-        const existingRows = tableBody.querySelectorAll('tr');
-        existingRows.forEach(r => {
-            setupRowEvents(r);
-        });
-
-        if (!hasEmptyRow()) {
-            addNewEmptyRow();
-        }
-    }
-
-    // 初始化命令拦截规则表格
-    function initCommandRulesTable() {
-        const tableBody = document.getElementById('commandRulesBody');
-
-        function updateRowNumbers() {
-            const rows = tableBody.querySelectorAll('tr');
-            rows.forEach((row, idx) => {
-                const numCell = row.querySelector('.number-cell');
-                if (numCell) {
-                    numCell.textContent = idx + 1;
-                }
-            });
-        }
-
-        function hasEmptyCommandRow() {
-            const rows = tableBody.querySelectorAll('tr');
-            for (const row of rows) {
-                if (!row.classList.contains('confirmed')) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        function addEmptyRow() {
-            const index = tableBody.querySelectorAll('tr').length + 1;
+        // Existing confirmed rows
+        paths.forEach((path, index) => {
             const row = document.createElement('tr');
             row.innerHTML = `
-            <td class="number-cell">${index}</td>
-            <td>
-                <input type="text" class="original-input font-mono" placeholder="Original command">
-                <div class="error-message">Vector cannot be empty</div>
+                <td class="number-cell">${index + 1}.</td>
+                <td class="path-cell">
+                    <input type="text" class="path-input confirmed font-mono" value="${escapeHtml(path)}" readonly>
+                </td>
+                <td class="action-cell">
+                    <button class="action-btn remove-btn btn-sm" data-path="${escapeAttr(path)}">Remove</button>
+                </td>
+            `;
+            row.querySelector('.remove-btn').addEventListener('click', async function () {
+                try {
+                    const path = this.dataset.path;
+                    await apiDeletePath(path);
+                    currentPaths = currentPaths.filter(p => p !== path);
+                    renderProtectedPaths(currentPaths);
+                    showNotification(`Path "${path}" removed`, 'success');
+                } catch (err) {
+                    showNotification(err.message, 'error');
+                }
+            });
+            tbody.appendChild(row);
+        });
+
+        // Empty row for adding new path
+        const emptyRow = document.createElement('tr');
+        emptyRow.innerHTML = `
+            <td class="number-cell">${paths.length + 1}.</td>
+            <td class="path-cell">
+                <input type="text" class="path-input font-mono" placeholder="e.g., /var/www/html/secure">
             </td>
-            <td class="arrow-cell font-mono">&gt;</td>
-            <td><input type="text" class="replace-input font-mono" placeholder="Sanitized command"></td>
             <td class="action-cell">
                 <button class="action-btn add-btn btn-sm">Add Rule</button>
             </td>
         `;
-            tableBody.appendChild(row);
-            setupRowEvents(row);
+
+        const input = emptyRow.querySelector('.path-input');
+        const addBtn = emptyRow.querySelector('.add-btn');
+
+        addBtn.addEventListener('click', async () => {
+            const path = input.value.trim();
+            if (!path) {
+                showNotification('Path cannot be empty', 'error');
+                return;
+            }
+            try {
+                await apiAddPath(path);
+                currentPaths.push(path);
+                renderProtectedPaths(currentPaths);
+                showNotification(`Path "${path}" added`, 'success');
+            } catch (err) {
+                showNotification(err.message, 'error');
+            }
+        });
+
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addBtn.click();
+        });
+
+        tbody.appendChild(emptyRow);
+    }
+
+    // ============================================================
+    // Command Rules rendering (with inline add row)
+    // ============================================================
+
+    function renderCommandRules(rules) {
+        const tbody = document.getElementById('commandRulesBody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        rules.forEach((rule, index) => {
+            const isBlock = !rule.action?.replace;
+            const replaceVal = rule.action?.replace ?? '';
+            const enabled = rule.enabled !== false;
+
+            const row = document.createElement('tr');
+            row.dataset.ruleId = rule.id;
+            row.innerHTML = `
+            <td class="number-cell">${index + 1}</td>
+            <td>
+                <input type="text" class="rule-name-input font-mono" value="${escapeHtml(rule.name || '')}" readonly>
+            </td>
+            <td>
+                <input type="text" class="original-input font-mono" value="${escapeHtml(rule.pattern)}" readonly>
+            </td>
+            <td class="arrow-cell font-mono">&gt;</td>
+            <td>
+                <input type="text" class="replace-input font-mono" value="${escapeHtml(isBlock ? '' : replaceVal)}" readonly>
+            </td>
+            <td style="text-align: center;">
+                <label class="toggle-switch">
+                    <input type="checkbox" class="rule-enabled-toggle" ${enabled ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </td>
+            <td class="action-cell">
+                <button class="action-btn remove-btn btn-sm">Remove</button>
+            </td>
+        `;
+
+            const toggle = row.querySelector('.rule-enabled-toggle');
+            toggle.addEventListener('change', async function () {
+                try {
+                    const newEnabled = this.checked;
+                    await apiPatchRule(rule.id, { enabled: newEnabled });
+                    rule.enabled = newEnabled;
+                    const ruleName = rule.name || rule.id;
+                    showNotification(`Rule "${ruleName}" ${newEnabled ? 'enabled' : 'disabled'}`, 'success');
+                } catch (err) {
+                    this.checked = !this.checked;
+                    showNotification(err.message, 'error');
+                }
+            });
+
+            row.querySelector('.remove-btn').addEventListener('click', async function () {
+                try {
+                    const ruleId = rule.id;
+                    const ruleName = rule.name || ruleId;
+                    await apiDeleteRule(ruleId);
+                    currentRules = currentRules.filter(r => r.id !== ruleId);
+                    renderCommandRules(currentRules);
+                    showNotification(`Rule "${ruleName}" deleted`, 'success');
+                } catch (err) {
+                    showNotification(err.message, 'error');
+                }
+            });
+
+            tbody.appendChild(row);
+        });
+
+        const emptyRow = document.createElement('tr');
+        emptyRow.classList.add('rule-new-row');
+        emptyRow.innerHTML = `
+        <td class="number-cell">${rules.length + 1}</td>
+        <td>
+            <input type="text" class="rule-name-input font-mono" placeholder="Rule name (optional)">
+        </td>
+        <td>
+            <input type="text" class="original-input font-mono" placeholder="Original command *">
+            <div class="error-message" style="display: none; color: #e74c3c; font-size: 0.8rem;">Pattern cannot be empty</div>
+        </td>
+        <td class="arrow-cell font-mono">&gt;</td>
+        <td><input type="text" class="replace-input font-mono" placeholder="Sanitized command"></td>
+        <td style="text-align: center;">
+            <label class="toggle-switch disabled">
+                <input type="checkbox" class="rule-enabled-toggle" checked disabled>
+                <span class="toggle-slider"></span>
+            </label>
+        </td>
+        <td class="action-cell">
+            <button class="action-btn add-btn btn-sm">Add Rule</button>
+        </td>
+    `;
+
+        const nameInput = emptyRow.querySelector('.rule-name-input');
+        const originalInput = emptyRow.querySelector('.original-input');
+        const replaceInput = emptyRow.querySelector('.replace-input');
+        const addBtn = emptyRow.querySelector('.add-btn');
+        const errorMsg = emptyRow.querySelector('.error-message');
+
+        addBtn.addEventListener('click', async () => {
+            const pattern = originalInput.value.trim();
+            if (!pattern) {
+                originalInput.classList.add('original-required');
+                errorMsg.style.display = 'block';
+                return;
+            }
+
+            const name = nameInput.value.trim();
+            const replacement = replaceInput.value.trim();
+            const action = replacement ? { replace: replacement } : { block: true };
+
+            const payload = { pattern, action };
+            if (name) payload.name = name;
+
+            try {
+                const result = await apiAddRule(payload);
+                currentRules.push(result.data);
+                renderCommandRules(currentRules);
+                const ruleName = result.data.name || result.data.id;
+                showNotification(`Rule "${ruleName}" added`, 'success');
+            } catch (err) {
+                showNotification(err.message, 'error');
+            }
+        });
+
+        originalInput.addEventListener('input', () => {
+            originalInput.classList.remove('original-required');
+            errorMsg.style.display = 'none';
+        });
+
+        [nameInput, originalInput, replaceInput].forEach(input => {
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') addBtn.click();
+            });
+        });
+
+        tbody.appendChild(emptyRow);
+    }
+
+    // ============================================================
+    // Rules page initialization
+    // ============================================================
+
+    function initRulesPage() {
+        fetchConfig().then(config => {
+            if (!config) return;
+            currentPaths = config.protected_paths || [];
+            currentRules = config.command_rules || [];
+            renderProtectedPaths(currentPaths);
+            renderCommandRules(currentRules);
+        });
+    }
+
+    // ============================================================
+    // Dashboard
+    // ============================================================
+
+    async function initDashboard() {
+        currentConfig = await fetchConfig();
+        if (currentConfig) {
+            updateStatus(currentConfig);
+            setModeSelectValue(currentConfig.basic?.mode);
         }
 
-        function setupRowEvents(row) {
-            const originalInput = row.querySelector('.original-input');
-            const replaceInput = row.querySelector('.replace-input');
-            const button = row.querySelector('button');
-            const errorMessage = row.querySelector('.error-message');
+        const stats = await fetchStats();
+        if (stats) updateStats(stats);
 
-            button.addEventListener('click', function() {
-                if (button.classList.contains('add-btn')) {
-                    if (!originalInput.value.trim()) {
-                        originalInput.classList.add('original-required');
-                        errorMessage.style.display = 'block';
-                        return;
-                    }
-
-                    row.classList.add('confirmed');
-                    originalInput.readOnly = true;
-                    replaceInput.readOnly = true;
-
-                    button.classList.remove('add-btn');
-                    button.classList.add('remove-btn');
-                    button.textContent = 'Remove';
-
-                    if (!hasEmptyCommandRow()) {
-                        addEmptyRow();
-                    }
+        const modeSelect = document.getElementById('mode-select');
+        if (modeSelect) {
+            modeSelect.addEventListener('change', async function () {
+                const newMode = this.value;
+                const result = await updateBasicConfig({ basic: { mode: newMode } });
+                if (result) {
+                    showNotification('Protection mode updated');
+                    currentConfig = await fetchConfig();
+                    updateStatus(currentConfig);
                 } else {
-                    row.remove();
-                    updateRowNumbers();
-                    if (!hasEmptyCommandRow()) {
-                        addEmptyRow();
-                    }
-                }
-            });
-
-            originalInput.addEventListener('input', function() {
-                if (this.value.trim()) {
-                    this.classList.remove('original-required');
-                    errorMessage.style.display = 'none';
+                    setModeSelectValue(currentConfig?.basic?.mode);
                 }
             });
         }
+    }
 
-        const existingRows = tableBody.querySelectorAll('tr');
-        existingRows.forEach(r => {
-            setupRowEvents(r);
-        });
-        if (!hasEmptyCommandRow()) {
-            addEmptyRow();
+    // ============================================================
+    // Logs page
+    // ============================================================
+
+    function initLogsPage() {
+        const logOutput = document.getElementById('log-output');
+        const filterLevel = document.getElementById('filter-level');
+        const filterUser = document.getElementById('filter-user');
+        const filterCommand = document.getElementById('filter-command');
+        const filterTimeStart = document.getElementById('filter-time-start');
+        const filterTimeEnd = document.getElementById('filter-time-end');
+        const clearFiltersBtn = document.getElementById('clear-filters');
+
+        if (!logOutput) return;
+
+        let logLines = [];
+        const MAX_LOG_LINES = 5000;
+        const logStreamStartTime = new Date();
+
+        const eventSource = new EventSource('/api/logs');
+
+        function extractLogDate(line) {
+            const match = line.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/);
+            if (!match) return null;
+            return new Date(match[1].replace(' ', 'T'));
+        }
+
+        function renderFilteredLogs() {
+            const levelFilter = filterLevel?.value || '';
+            const userFilter = (filterUser?.value || '').trim().toLowerCase();
+            const cmdFilter = (filterCommand?.value || '').trim().toLowerCase();
+            const startStr = filterTimeStart?.value;
+            const endStr = filterTimeEnd?.value;
+
+            let startDate = startStr ? new Date(startStr) : null;
+            let endDate = endStr ? new Date(endStr) : null;
+            if (startDate && isNaN(startDate)) startDate = null;
+            if (endDate && isNaN(endDate)) endDate = null;
+
+            const filtered = logLines.filter(line => {
+                if (levelFilter && !line.includes(levelFilter)) return false;
+                if (userFilter && !line.toLowerCase().includes(userFilter)) return false;
+                if (cmdFilter && !line.toLowerCase().includes(cmdFilter)) return false;
+                if (startDate || endDate) {
+                    const logDate = extractLogDate(line);
+                    if (!logDate) return false;
+                    if (startDate && logDate < startDate) return false;
+                    if (endDate && logDate > endDate) return false;
+                }
+                return true;
+            });
+
+            logOutput.textContent = [...filtered].reverse().join('\n');
+            logOutput.scrollTop = 0;
+        }
+
+        function addLogLine(line) {
+            logLines.push(line);
+            if (logLines.length > MAX_LOG_LINES) logLines.shift();
+            renderFilteredLogs();
+
+            const logDate = extractLogDate(line);
+            if (logDate && logDate >= logStreamStartTime) {
+                if (typeof showLogNotification === 'function') showLogNotification(line);
+                playNotificationSound();
+            }
+        }
+
+        eventSource.addEventListener('log', e => { if (e.data) addLogLine(e.data); });
+        eventSource.addEventListener('error', e => { addLogLine('[SYSTEM ERROR] ' + (e.data || 'Connection lost')); });
+
+        if (filterLevel) filterLevel.addEventListener('change', renderFilteredLogs);
+        if (filterUser) filterUser.addEventListener('input', renderFilteredLogs);
+        if (filterCommand) filterCommand.addEventListener('input', renderFilteredLogs);
+        if (filterTimeStart) filterTimeStart.addEventListener('change', renderFilteredLogs);
+        if (filterTimeEnd) filterTimeEnd.addEventListener('change', renderFilteredLogs);
+
+        if (clearFiltersBtn) {
+            clearFiltersBtn.addEventListener('click', function () {
+                if (filterLevel) filterLevel.value = '';
+                if (filterUser) filterUser.value = '';
+                if (filterCommand) filterCommand.value = '';
+                if (filterTimeStart) filterTimeStart.value = '';
+                if (filterTimeEnd) filterTimeEnd.value = '';
+                renderFilteredLogs();
+            });
+        }
+
+        window.addEventListener('beforeunload', () => eventSource.close());
+    }
+
+
+    // ============================================================
+    // Plugin Management Page
+    // ============================================================
+
+    async function fetchPlugins() {
+        try {
+            const res = await fetch('/api/plugins');
+            if (res.status === 401) { window.location.href = '/login'; return { data: [] }; }
+            if (!res.ok) throw new Error('Failed to fetch plugins');
+            return await res.json();
+        } catch (err) {
+            console.error(err);
+            Toast.error('Failed to load plugins');
+            return { data: [] };
         }
     }
 
-    function getProtectedPaths() {
-        const paths = [];
-        const rows = document.querySelectorAll('#protectedPathsBody tr');
+    function renderPluginCards(plugins) {
+        const container = document.getElementById('plugin-list');
+        const countBadge = document.getElementById('plugin-count');
+        if (!container) return;
 
-        rows.forEach(row => {
-            const input = row.querySelector('.path-input');
-            if (input && input.value.trim()) {
-                paths.push(input.value.trim());
-            }
+        container.innerHTML = '';
+        if (plugins.length === 0) {
+            container.innerHTML = '<div class="empty-state">No plugins installed. Install one to extend functionality.</div>';
+            if (countBadge) countBadge.textContent = '0 Loaded';
+            return;
+        }
+
+        if (countBadge) countBadge.textContent = `${plugins.length} Loaded`;
+
+        plugins.forEach(p => {
+            const card = document.createElement('div');
+            card.className = 'plugin-card';
+            card.dataset.id = p.id;
+
+            const enabled = p.enabled !== false;
+            const statusClass = enabled ? 'enabled' : 'disabled';
+            const statusText = enabled ? 'ENABLED' : 'DISABLED';
+
+            card.innerHTML = `
+            <div class="plugin-card-header">
+                <div class="plugin-icon">🔌</div>
+                <div class="plugin-info">
+                    <h5>${escapeHtml(p.name)}</h5>
+                    <span class="plugin-version">v${escapeHtml(p.version)}</span>
+                </div>
+            </div>
+            <div class="plugin-description">${escapeHtml(p.description || 'No description')}</div>
+            <div class="plugin-meta">
+                <div>Type: ${escapeHtml(p.type)} | Author: ${escapeHtml(p.author)}</div>
+            </div>
+            <div class="plugin-actions">
+                <div class="plugin-status">
+                    <span class="status-badge ${statusClass}">${statusText}</span>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <label class="toggle-switch">
+                        <input type="checkbox" class="plugin-toggle" ${enabled ? 'checked' : ''}>
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <button class="action-btn remove-btn btn-sm plugin-delete">Delete</button>
+                </div>
+            </div>
+        `;
+
+            const toggle = card.querySelector('.plugin-toggle');
+            toggle.addEventListener('change', async (e) => {
+                const newEnabled = e.target.checked;
+                try {
+                    const res = await fetch('/api/plugins/toggle', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: p.id, enabled: newEnabled })
+                    });
+                    if (res.status === 401) { window.location.href = '/login'; return; }
+                    if (!res.ok) throw new Error('Toggle failed');
+                    Toast.success(`Plugin ${newEnabled ? 'enabled' : 'disabled'}`);
+                    const badge = card.querySelector('.status-badge');
+                    badge.className = `status-badge ${newEnabled ? 'enabled' : 'disabled'}`;
+                    badge.textContent = newEnabled ? 'ENABLED' : 'DISABLED';
+                    p.enabled = newEnabled;
+                } catch (err) {
+                    Toast.error(err.message);
+                    e.target.checked = !newEnabled;
+                }
+            });
+
+            const deleteBtn = card.querySelector('.plugin-delete');
+            deleteBtn.addEventListener('click', async () => {
+                if (!confirm(`Delete plugin "${p.name}"?`)) return;
+                try {
+                    const res = await fetch(`/api/plugins/${encodeURIComponent(p.id)}`, {
+                        method: 'DELETE'
+                    });
+                    if (res.status === 401) { window.location.href = '/login'; return; }
+                    if (!res.ok) throw new Error('Delete failed');
+                    Toast.success('Plugin deleted');
+                    initPluginPage();
+                } catch (err) {
+                    Toast.error(err.message);
+                }
+            });
+
+            container.appendChild(card);
         });
-
-        return paths;
     }
 
-    function getCommandRules() {
-        const rules = [];
-        const rows = document.querySelectorAll('#commandRulesBody tr');
+    async function initPluginPage() {
+        const data = await fetchPlugins();
+        renderPluginCards(data.data);
+    }
 
-        rows.forEach(row => {
-            const originalInput = row.querySelector('.original-input');
-            const replaceInput = row.querySelector('.replace-input');
+    function initPluginInstall() {
+        const form = document.getElementById('install-plugin-form');
+        if (!form) return;
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = document.getElementById('plugin-file');
+            const file = fileInput.files[0];
+            if (!file) {
+                Toast.error('Please select a plugin package');
+                return;
+            }
 
-            if (originalInput && originalInput.value.trim()) {
-                const original = originalInput.value.trim();
-                const replacement = replaceInput.value.trim();
-                const rule = replacement ? `${original} > ${replacement}` : `${original} >`;
-                rules.push(rule);
+            const formData = new FormData();
+            formData.append('plugin', file);
+
+            try {
+                const res = await fetch('/api/plugins/install', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (res.status === 401) { window.location.href = '/login'; return; }
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || 'Installation failed');
+                }
+                Toast.success(`Plugin "${data.data.name}" installed successfully`);
+                fileInput.value = '';
+                initPluginPage();
+            } catch (err) {
+                Toast.error(err.message);
             }
         });
-
-        return rules;
     }
+
+    function initPluginManagement() {
+        const pluginPage = document.getElementById('plugin');
+        if (!pluginPage) return;
+
+        const observer = new MutationObserver(mutations => {
+            mutations.forEach(m => {
+                if (m.attributeName === 'class' && pluginPage.classList.contains('active')) {
+                    initPluginPage();
+                }
+            });
+        });
+        observer.observe(pluginPage, { attributes: true });
+
+        const refreshBtn = document.getElementById('refresh-plugins-btn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', initPluginPage);
+        }
+
+        initPluginInstall();
+
+        if (pluginPage.classList.contains('active')) {
+            initPluginPage();
+        }
+    }
+
+
+    // ============================================================
+    // Utilities
+    // ============================================================
 
     function playNotificationSound() {
         try {
             const audio = new Audio('/msg.mp3');
             audio.volume = 0.5;
-            audio.play().catch(error => {
-                console.log('Notification playback failed:', error);
-            });
-        } catch (error) {
-            console.log('Notification initialization failed:', error);
-        }
+            audio.play().catch(() => { });
+        } catch (_) { }
     }
 
-    // 日志页面初始化
-    function initLogsPage() {
-        const logOutput = document.getElementById('log-output');
-        const pauseBtn = document.getElementById('pause-logs');
-        const clearBtn = document.getElementById('clear-logs');
-        let paused = false;
-        const logStreamStartTime = new Date();
-
-        const eventSource = new EventSource('/api/logs');
-
-        eventSource.addEventListener('log', function(event) {
-            if (paused) return;
-            if (event.data) {
-                logOutput.textContent += event.data + '\n';
-                logOutput.scrollTop = logOutput.scrollHeight;
-
-                const logTimeStr = event.data.substring(0, 19).trim();
-                const logTime = new Date(logTimeStr);
-
-                if (logTime >= logStreamStartTime) {
-                    showLogNotification(event.data);
-                    playNotificationSound();
-                }
+    if (typeof showLogNotification === 'undefined') {
+        window.showLogNotification = function (line) {
+            const match = line.match(/\[(.*?)\] (.*?) - (.*)/);
+            if (match) {
+                Toast.info(`[${match[1]}] ${match[3]}`, 3000);
             }
-        });
-
-        function showLogNotification(message) {
-            const container = document.getElementById('notificationContainer');
-
-            if (!container) {
-                const containerDiv = document.createElement('div');
-                containerDiv.id = 'notificationContainer';
-                containerDiv.className = 'notification-container';
-                document.body.appendChild(containerDiv);
-            }
-
-            const notification = document.createElement('div');
-            notification.className = 'notification msg';
-            notification.innerHTML = `
-        <div class="notification-content">${message}</div>
-        <button class="notification-close" onclick="this.parentElement.remove()">×</button>
-    `;
-
-            document.getElementById('notificationContainer').appendChild(notification);
-
-            setTimeout(() => {
-                notification.style.animation = 'slideIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards, fadeOut 0.4s ease forwards 4.6s';
-            }, 10);
-
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.remove();
-                }
-            }, 5000);
-        }
-
-        eventSource.addEventListener('error', function(event) {
-            logOutput.textContent += '[SYSTEM ERROR] ' + event.data + '\n';
-            logOutput.scrollTop = logOutput.scrollHeight;
-        });
-
-        pauseBtn.addEventListener('click', function() {
-            paused = !paused;
-            this.textContent = paused ? 'Resume Stream' : 'Pause Stream';
-            this.classList.toggle('btn-ghost');
-            this.classList.toggle('btn-primary');
-        });
-
-        clearBtn.addEventListener('click', function() {
-            logOutput.textContent = '';
-        });
+        };
     }
 
-    // 工具页面初始化
-    function initToolsPage() {
-        const commandInput = document.getElementById('command');
-        const executeBtn = document.getElementById('execute-btn');
-        const commandOutput = document.getElementById('command-output');
-        const toolsPage = document.getElementById('tools');
+    // ============================================================
+    // Periodic stats refresh
+    // ============================================================
 
-        function showWarningBanner() {
-            if (document.querySelector('.warning-banner')) return;
-
-            const banner = document.createElement('div');
-            banner.className = 'warning-banner blinking';
-            banner.innerHTML = '<span>[CRITICAL] CAUTION: NATIVE HOST SHELL ENVIRONMENT ACTIVE.</span>';
-
-            document.body.prepend(banner);
-
-            setTimeout(() => {
-                if (banner && banner.style.display !== 'none') {
-                    banner.style.transition = 'opacity 0.5s ease';
-                    banner.style.opacity = '0';
-                    setTimeout(() => {
-                        if (banner && banner.parentNode) {
-                            banner.parentNode.removeChild(banner);
-                        }
-                    }, 500);
-                }
-            }, 5000);
-        }
-
-        const observer = new MutationObserver((mutations) => {
-            mutations.forEach(mutation => {
-                if (mutation.attributeName === 'class') {
-                    if (toolsPage.classList.contains('active')) {
-                        showWarningBanner();
-                    }
-                }
-            });
-        });
-
-        observer.observe(toolsPage, {
-            attributes: true
-        });
-
-        if (toolsPage.classList.contains('active')) {
-            showWarningBanner();
-        }
-
-        executeBtn.addEventListener('click', async function() {
-            if (!commandInput.value.trim()) return;
-            
-            commandOutput.textContent = 'Executing...';
-            const result = await executeCommand(commandInput.value);
-            if (result) {
-                commandOutput.textContent = result.output;
-            } else {
-                commandOutput.textContent = 'Execution failed or timeout.';
-            }
-        });
-
-        commandInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                executeBtn.click();
-            }
-        });
-    }
-
-    // 定期刷新仪表盘
     setInterval(async () => {
-        if (document.getElementById('dashboard').classList.contains('active')) {
+        const dashboard = document.getElementById('dashboard');
+        if (dashboard && dashboard.classList.contains('active')) {
             const stats = await fetchStats();
-            if (stats) {
-                updateStats(stats);
-            }
+            if (stats) updateStats(stats);
         }
     }, 5000);
 
-    // 初始化所有页面
+    // ============================================================
+    // Toast notification manager
+    // ============================================================
+    const Toast = (() => {
+        const container = document.getElementById('toast-container');
+
+        if (!container) {
+            console.warn('Toast container not found');
+        }
+
+        function createToast(message, type = 'info', duration = 5000) {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+
+            const icon = document.createElement('div');
+            icon.className = 'toast-icon';
+            if (type === 'success') icon.textContent = '✓';
+            else if (type === 'error') icon.textContent = '✕';
+            else if (type === 'warning') icon.textContent = '⚠';
+            else icon.textContent = 'ℹ';
+
+            const content = document.createElement('div');
+            content.className = 'toast-content';
+            content.textContent = message;
+
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'toast-close';
+            closeBtn.innerHTML = '×';
+            closeBtn.addEventListener('click', () => removeToast(toast));
+
+            toast.appendChild(icon);
+            toast.appendChild(content);
+            toast.appendChild(closeBtn);
+
+            container.appendChild(toast);
+
+            const timeoutId = setTimeout(() => removeToast(toast), duration);
+            toast.dataset.timeoutId = timeoutId;
+
+            return toast;
+        }
+
+        function removeToast(toast) {
+            if (!toast || !toast.parentNode) return;
+
+            clearTimeout(parseInt(toast.dataset.timeoutId));
+            toast.classList.add('removing');
+
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            }, 300);
+        }
+
+        return {
+            success: (msg, duration) => createToast(msg, 'success', duration),
+            error: (msg, duration) => createToast(msg, 'error', duration),
+            warning: (msg, duration) => createToast(msg, 'warning', duration),
+            info: (msg, duration) => createToast(msg, 'info', duration)
+        };
+    })();
+
+    // ============================================================
+    // Boot
+    // ============================================================
+
     initDashboard();
-    initConfigPage();
     initRulesPage();
     initLogsPage();
-    initToolsPage();
-
-    // 操作按钮
-    document.getElementById('reload-btn').addEventListener('click', async function() {
-        const result = await reloadService();
-        if (result) {
-            showNotification('Engine configuration reloaded successfully');
-            initDashboard();
-        }
-    });
-
-    document.getElementById('restart-btn').addEventListener('click', async function() {
-        if(confirm("WARNING: This will momentarily interrupt protection services. Proceed?")) {
-            const result = await restartService();
-            if (result) {
-                showNotification('Protection service restarted');
-                initDashboard();
-            }
-        }
-    });
+    initPluginManagement();
 });

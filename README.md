@@ -4,52 +4,60 @@ Deeprotection Nexus is the next‑generation web management platform for the Dee
 
 ## Features
 
-### 1. System Overview
+### 1. Login Page
+The web interface is secured by a password-based login; the first login sets the password hash.
+
+**Preview:**  
+![Login Page](https://github.com/Geekstrange/Deeprotection-Nexus/blob/main/img/login.png "Login Interface")
+
+### 2. System Overview
 Displays key info like protection status, expiration time, and protection count.
 
 **Preview:**  
-![System Overview](https://github.com/Geekstrange/Deeprotection-WebGUI/blob/main/img/system-overview.png "System Overview Interface")
-
-### 2. Configuration Management
-Set basic configurations like language, protection switch, and auto-update.
-
-**Preview:**  
-![Configuration Management](https://github.com/Geekstrange/Deeprotection-WebGUI/blob/main/img/config-management.png "Configuration Management Interface")
+![System Overview](https://github.com/Geekstrange/Deeprotection-Nexus/blob/main/img/system-overview.png "System Overview Interface")
 
 ### 3. Rule Management
 Manage protected paths and command interception rules.
 
 **Preview:**  
-![Rule Management](https://github.com/Geekstrange/Deeprotection-WebGUI/blob/main/img/rule-management.png "Rule Management Interface")
+![Rule Management](https://github.com/Geekstrange/Deeprotection-Nexus/blob/main/img/rule-management.png "Rule Management Interface")
 
 ### 4. Log Viewing
-View system protection logs in real time.
+View system protection logs in real time via Server-Sent Events (SSE).
 
 **Preview:**  
-![Log Viewing](https://github.com/Geekstrange/Deeprotection-WebGUI/blob/main/img/log-viewing.png "Real-time Log View")
+![Log Viewing](https://github.com/Geekstrange/Deeprotection-Nexus/blob/main/img/log-viewing.png "Real-time Log View")
 
-### 5. Terminal Tool
-Execute system commands for debugging and management.
+### 5. Plugin Management
+Install, enable, disable, and remove plugins to extend the platform's capabilities. Plugins are distributed as ZIP archives containing a `plugin.json` manifest.
 
 **Preview:**  
-![Terminal Tool](https://github.com/Geekstrange/Deeprotection-WebGUI/blob/main/img/terminal-tool.png "Terminal Tool Interface")
+![Rule Management](https://github.com/Geekstrange/Deeprotection-Nexus/blob/main/img/plugin-management.png "Plugin Management Interface")
 
 ---
 
-5. Run ./dn -host 127.0.0.1-port 8080
+## Quick Start
+
+Run the server with a custom listen address:
+
+```bash
+./dn -listen 127.0.0.1:8080
+```
+
+The default listen address is `127.0.0.1:80`. After startup, open `http://127.0.0.1:8080` in your browser. You will be redirected to the login page.
 
 ## Configuration File
 
 The configuration file is located at `/etc/deeprotection/config.toml` and includes:
 
-- `language`: UI language setting.
-- `mode`: Protection mode (disable / permissive / Enforcing).
-
-It also contains the list of protected paths and command interception rules.
+- `core.mode`: Protection mode (`disable`, `permissive`, or `enforcing`).
+- `auth.password_hash`: SHA-256 hex digest of the admin password.
+- `paths.protect`: List of protected file/directory paths.
+- `rules`: Array of command interception rules.
 
 ## Logs
 
-System logs are stored in `/var/log/dp.log` and can be viewed in real time via the "Log Viewing" page in the web interface.
+System logs are stored in `/var/log/audit.log` (JSON Lines format) and can be viewed in real time via the "Log Viewing" page in the web interface.
 
 ## License
 

@@ -1,433 +1,757 @@
 package main
 
 import (
-	"embed"
+	"archive/zip"
 	"bufio"
+	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
+	"embed"
+	"encoding/hex"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/BurntSushi/toml"
 	"github.com/gin-contrib/static"
+	"github.com/gin-gonic/gin"
 )
 
-// 嵌入整个 public
+var listenAddr string
+
+func init() {
+	flag.StringVar(&listenAddr, "listen", "127.0.0.1:80", "listen address, e.g., 0.0.0.0:9090")
+	flag.Parse()
+}
+
 //go:embed public/*
 var staticFS embed.FS
 
 const (
-	ConfigPath     = "/etc/deeprotection/deeprotection.conf"
-	LogPath        = "/var/log/deeprotection.log"
-	LanguagePath   = "/usr/share/locale/deeprotection/"
-	DefaultIP      = "127.0.0.1"
-	DefaultPort    = 8080
+	ConfigPath  = "/etc/deeprotection/config.toml"
+	LogPath     = "/var/log/audit.log"
+
+	SessionCookieName = "dp_session"
 )
 
-var (
-	webIP   = DefaultIP
-	webPort = DefaultPort
-)
+// ============================================================
+// TOML Config Structs
+// ============================================================
+
+type TomlConfig struct {
+	Core  CoreConfig  `toml:"core" json:"core"`
+	Auth  AuthConfig  `toml:"auth" json:"auth"`
+	Paths PathsConfig `toml:"paths" json:"paths"`
+	Rules []TomlRule  `toml:"rules" json:"rules"`
+}
+
+type CoreConfig struct {
+	Mode     string `toml:"mode" json:"mode"`
+}
+
+// AuthConfig holds the hashed admin password.
+// Store a SHA-256 hex digest so the plaintext never sits in the file.
+// Example: echo -n "mypassword" | sha256sum
+type AuthConfig struct {
+	PasswordHash string `toml:"password_hash" json:"password_hash"`
+}
+
+type PathsConfig struct {
+	Protect []string `toml:"protect" json:"protect"`
+}
+
+type TomlRule struct {
+	ID      string     `toml:"id" json:"id"`
+	Name    string     `toml:"name" json:"name"`
+	Pattern string     `toml:"pattern" json:"pattern"`
+	Action  RuleAction `toml:"action" json:"action"`
+	Enabled bool       `toml:"enabled" json:"enabled"`
+}
+
+type RuleAction struct {
+	Block   *bool   `toml:"block,omitempty" json:"block,omitempty"`
+	Replace *string `toml:"replace,omitempty" json:"replace,omitempty"`
+}
+
+// LogEntry corresponds to the JSON structure emitted by the Rust logger.
+type LogEntry struct {
+	Timestamp  string `json:"timestamp"`
+	Level      string `json:"level"`
+	User       string `json:"user"`
+	Mode       string `json:"mode"`
+	Command    string `json:"command"`
+	WorkingDir string `json:"working_dir"`
+	PID        uint32 `json:"pid"`
+	ExitCode   int    `json:"exit_code"`
+	Message    string `json:"message"`
+}
+
+// ============================================================
+// API Input Types
+// ============================================================
+
+// AddRuleInput is used for POST and PUT /api/command-rules.
+type AddRuleInput struct {
+	Pattern string     `json:"pattern"`
+	Action  RuleAction `json:"action"`
+	Name    string     `json:"name"`
+	Enabled *bool      `json:"enabled"`
+}
+
+// UpdateRuleInput is used for PATCH /api/command-rules/:id (partial update).
+type UpdateRuleInput struct {
+	Pattern *string     `json:"pattern"`
+	Action  *RuleAction `json:"action"`
+	Name    *string     `json:"name"`
+	Enabled *bool       `json:"enabled"`
+}
+
+// ============================================================
+// Auth Helpers
+// ============================================================
+
+// hashPassword returns the hex-encoded SHA-256 digest of the input.
+func hashPassword(password string) string {
+	sum := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(sum[:])
+}
+
+// generateSessionToken creates a random 32-byte hex token.
+func generateSessionToken() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// In-memory session store: token -> expiry time.
+// For production you would use Redis or a signed JWT; this is intentionally
+// simple to keep the dependency footprint minimal.
+var sessions = map[string]time.Time{}
+
+func createSession() string {
+	token := generateSessionToken()
+	sessions[token] = time.Now().Add(24 * time.Hour)
+	return token
+}
+
+func isValidSession(token string) bool {
+	if token == "" {
+		return false
+	}
+	expiry, ok := sessions[token]
+	if !ok {
+		return false
+	}
+	if time.Now().After(expiry) {
+		delete(sessions, token)
+		return false
+	}
+	return true
+}
+
+func deleteSession(token string) {
+	delete(sessions, token)
+}
+
+// authMiddleware rejects API requests that don't carry a valid session cookie.
+func authMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token, _ := c.Cookie(SessionCookieName)
+		if !isValidSession(token) {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// ============================================================
+// Auth Handlers
+// ============================================================
+
+// POST /api/login
+// Body: { "password": "..." }
+func loginHandler(c *gin.Context) {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	conf, err := LoadConfig()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load configuration"})
+		return
+	}
+
+	if conf.Auth.PasswordHash == "" {
+		// No password configured — set the first password supplied as the hash.
+		conf.Auth.PasswordHash = hashPassword(req.Password)
+		if err := SaveConfig(conf); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save configuration"})
+			return
+		}
+	} else if hashPassword(req.Password) != conf.Auth.PasswordHash {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid password."})
+		return
+	}
+
+	token := createSession()
+	c.SetCookie(SessionCookieName, token, 86400, "/", "", false, true)
+	c.JSON(http.StatusOK, gin.H{"message": "Login successful"})
+}
+
+// POST /api/logout
+func logoutHandler(c *gin.Context) {
+	token, _ := c.Cookie(SessionCookieName)
+	deleteSession(token)
+	c.SetCookie(SessionCookieName, "", -1, "/", "", false, true)
+	c.JSON(http.StatusOK, gin.H{"message": "Logged out"})
+}
+
+// GET /api/auth/status — lets the frontend check whether the session is alive.
+func authStatusHandler(c *gin.Context) {
+	token, _ := c.Cookie(SessionCookieName)
+	c.JSON(http.StatusOK, gin.H{"authenticated": isValidSession(token)})
+}
+
+// ============================================================
+// Service Layer
+// ============================================================
+
+func generateID() string {
+	b := make([]byte, 6)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
+}
+
+func generateRuleName() string {
+	return fmt.Sprintf("rule_%d_%s", time.Now().Unix(), generateID()[:4])
+}
+
+// LoadConfig reads and decodes the TOML configuration file.
+func LoadConfig() (*TomlConfig, error) {
+	var conf TomlConfig
+	if _, err := toml.DecodeFile(ConfigPath, &conf); err != nil {
+		return nil, err
+	}
+	if conf.Paths.Protect == nil {
+		conf.Paths.Protect = []string{}
+	}
+	if conf.Rules == nil {
+		conf.Rules = []TomlRule{}
+	}
+	return &conf, nil
+}
+
+// SaveConfig performs an atomic write: encode to a temp file, then rename into place.
+func SaveConfig(conf *TomlConfig) error {
+	if conf.Paths.Protect == nil {
+		conf.Paths.Protect = []string{}
+	}
+	if conf.Rules == nil {
+		conf.Rules = []TomlRule{}
+	}
+	dir := filepath.Dir(ConfigPath)
+	tmp, err := os.CreateTemp(dir, "deeprotection-*.toml.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	if err := toml.NewEncoder(tmp).Encode(conf); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("encoding config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, ConfigPath); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("renaming temp file: %w", err)
+	}
+	return nil
+}
+
+// normalizeAction ensures exactly one of block or replace is set; defaults to block:true.
+func normalizeAction(a RuleAction) RuleAction {
+	if a.Replace != nil {
+		s := strings.TrimSpace(*a.Replace)
+		a.Replace = &s
+		a.Block = nil
+		return a
+	}
+	t := true
+	a.Block = &t
+	a.Replace = nil
+	return a
+}
+
+// AddProtectedPath adds a path after validation and deduplication.
+func AddProtectedPath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("path cannot be empty")
+	}
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("path must not contain '..'")
+	}
+	conf, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	for _, p := range conf.Paths.Protect {
+		if p == path {
+			return fmt.Errorf("path already exists")
+		}
+	}
+	conf.Paths.Protect = append(conf.Paths.Protect, path)
+	return SaveConfig(conf)
+}
+
+// RemoveProtectedPath removes a path by exact value match.
+func RemoveProtectedPath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("path cannot be empty")
+	}
+	conf, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	newPaths := make([]string, 0, len(conf.Paths.Protect))
+	found := false
+	for _, p := range conf.Paths.Protect {
+		if p == path {
+			found = true
+			continue
+		}
+		newPaths = append(newPaths, p)
+	}
+	if !found {
+		return fmt.Errorf("path not found")
+	}
+	conf.Paths.Protect = newPaths
+	return SaveConfig(conf)
+}
+
+// AddCommandRule creates a new rule, assigns ID and default name, then persists.
+func AddCommandRule(input *AddRuleInput) (*TomlRule, error) {
+	pattern := strings.TrimSpace(input.Pattern)
+	if pattern == "" {
+		return nil, fmt.Errorf("pattern cannot be empty")
+	}
+	if strings.Contains(pattern, "..") {
+		return nil, fmt.Errorf("pattern must not contain '..'")
+	}
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		name = generateRuleName()
+	}
+	enabled := true
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	rule := TomlRule{
+		ID:      generateID(),
+		Name:    name,
+		Pattern: pattern,
+		Action:  normalizeAction(input.Action),
+		Enabled: enabled,
+	}
+	conf, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	conf.Rules = append(conf.Rules, rule)
+	if err := SaveConfig(conf); err != nil {
+		return nil, err
+	}
+	return &rule, nil
+}
+
+// FullUpdateCommandRule replaces a rule's fields entirely (PUT semantics).
+func FullUpdateCommandRule(id string, input *AddRuleInput) (*TomlRule, error) {
+	conf, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	for i, r := range conf.Rules {
+		if r.ID != id {
+			continue
+		}
+		pattern := strings.TrimSpace(input.Pattern)
+		if pattern == "" {
+			return nil, fmt.Errorf("pattern cannot be empty")
+		}
+		name := strings.TrimSpace(input.Name)
+		if name == "" {
+			name = r.Name
+		}
+		enabled := r.Enabled
+		if input.Enabled != nil {
+			enabled = *input.Enabled
+		}
+		conf.Rules[i] = TomlRule{
+			ID:      id,
+			Name:    name,
+			Pattern: pattern,
+			Action:  normalizeAction(input.Action),
+			Enabled: enabled,
+		}
+		if err := SaveConfig(conf); err != nil {
+			return nil, err
+		}
+		updated := conf.Rules[i]
+		return &updated, nil
+	}
+	return nil, fmt.Errorf("rule not found")
+}
+
+// PatchCommandRule applies a partial update to a rule (PATCH semantics).
+func PatchCommandRule(id string, input *UpdateRuleInput) (*TomlRule, error) {
+	conf, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	for i, r := range conf.Rules {
+		if r.ID != id {
+			continue
+		}
+		if input.Pattern != nil {
+			p := strings.TrimSpace(*input.Pattern)
+			if p == "" {
+				return nil, fmt.Errorf("pattern cannot be empty")
+			}
+			conf.Rules[i].Pattern = p
+		}
+		if input.Name != nil {
+			conf.Rules[i].Name = strings.TrimSpace(*input.Name)
+		}
+		if input.Enabled != nil {
+			conf.Rules[i].Enabled = *input.Enabled
+		}
+		if input.Action != nil {
+			conf.Rules[i].Action = normalizeAction(*input.Action)
+		}
+		if err := SaveConfig(conf); err != nil {
+			return nil, err
+		}
+		updated := conf.Rules[i]
+		return &updated, nil
+	}
+	return nil, fmt.Errorf("rule not found")
+}
+
+// DeleteCommandRule removes a rule by ID.
+func DeleteCommandRule(id string) error {
+	conf, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	newRules := make([]TomlRule, 0, len(conf.Rules))
+	found := false
+	for _, r := range conf.Rules {
+		if r.ID == id {
+			found = true
+			continue
+		}
+		newRules = append(newRules, r)
+	}
+	if !found {
+		return fmt.Errorf("rule not found")
+	}
+	conf.Rules = newRules
+	return SaveConfig(conf)
+}
+
+// ============================================================
+// Main
+// ============================================================
 
 func main() {
-	// 解析配置获取Web设置
-	parseConfigForWebSettings()
+	gin.SetMode(gin.ReleaseMode)
 
 	r := gin.Default()
 
-	// 正确处理EmbedFolder的返回值
-	staticFS, err := static.EmbedFolder(staticFS, "public")
+	embeddedStaticFS, err := static.EmbedFolder(staticFS, "public")
 	if err != nil {
 		log.Fatalf("Failed to create embed folder: %v", err)
 	}
-	r.Use(static.Serve("/", staticFS))
+	r.Use(static.Serve("/", embeddedStaticFS))
+
+	// Serve the login page at /login (must be in public/login.html via embed).
+	r.GET("/login", func(c *gin.Context) {
+		token, _ := c.Cookie(SessionCookieName)
+		if isValidSession(token) {
+			c.Redirect(http.StatusFound, "/")
+			return
+		}
+		c.FileFromFS("public/login.html", http.FS(staticFS))
+	})
 
 	api := r.Group("/api")
 	{
-		api.GET("/config", getConfigHandler)
-		api.GET("/stats", getStatsHandler)
-		api.POST("/config", updateConfigHandler)
-		api.GET("/languages", getLanguagesHandler)
-		api.GET("/logs", logStreamHandler)
-		api.POST("/reload", reloadHandler)
-		api.POST("/restart", restartHandler)
-		api.POST("/command", commandHandler)
+		// Public auth endpoints — no session required.
+		api.POST("/login", loginHandler)
+		api.POST("/logout", logoutHandler)
+		api.GET("/auth/status", authStatusHandler)
+
+		// All remaining API routes require a valid session.
+		protected := api.Group("/", authMiddleware())
+		{
+			// Unified config view (GET) and global settings update (POST, mode only).
+			protected.GET("/config", getConfigHandler)
+			protected.POST("/config", updateBasicConfigHandler)
+
+			// Stats and logs.
+			protected.GET("/stats", getStatsHandler)
+			protected.GET("/logs", logStreamHandler)
+
+			// Protected paths management.
+			protected.GET("/protected-paths", listProtectedPathsHandler)
+			protected.POST("/protected-paths", addProtectedPathHandler)
+			protected.DELETE("/protected-paths", deleteProtectedPathHandler)
+
+			// Command rules management.
+			protected.GET("/command-rules", listCommandRulesHandler)
+			protected.POST("/command-rules", addCommandRuleHandler)
+			protected.PUT("/command-rules/:id", putCommandRuleHandler)
+			protected.PATCH("/command-rules/:id", patchCommandRuleHandler)
+			protected.DELETE("/command-rules/:id", deleteCommandRuleHandler)
+
+			// Plugin
+			protected.GET("/plugins", listPluginsHandler)
+			protected.POST("/plugins/toggle", togglePluginHandler)
+			protected.DELETE("/plugins/:id", deletePluginHandler)
+			protected.POST("/plugins/install", installPluginHandler)
+		}
 	}
 
-	addr := fmt.Sprintf("%s:%d", webIP, webPort)
-	log.Printf("Starting Deeprotection Web GUI on %s", addr)
-	log.Fatal(r.Run(addr))
+	log.Printf("Starting Deeprotection Nexus on %s", listenAddr)
+	if err := r.Run(listenAddr); err != nil {
+		log.Fatal(err)
+	}
 }
 
-// 获取统计信息
+// ============================================================
+// Config Handlers
+// ============================================================
+
+func getConfigHandler(c *gin.Context) {
+	conf, err := LoadConfig()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"basic":           gin.H{"mode": conf.Core.Mode},
+		"protected_paths": conf.Paths.Protect,
+		"command_rules":   conf.Rules,
+	})
+}
+
+// updateBasicConfigHandler handles only global settings such as mode.
+// Bulk rule/path updates via this endpoint are removed; use the dedicated endpoints instead.
+func updateBasicConfigHandler(c *gin.Context) {
+	var req map[string]interface{}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+	conf, err := LoadConfig()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if basicRaw, ok := req["basic"]; ok {
+		if basicMap, ok := basicRaw.(map[string]interface{}); ok {
+			if mode, ok := basicMap["mode"].(string); ok {
+				conf.Core.Mode = mode
+			}
+		}
+	}
+	if err := SaveConfig(conf); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Configuration updated successfully"})
+}
+
+// ============================================================
+// Stats Handler
+// ============================================================
+
 func getStatsHandler(c *gin.Context) {
-	// 统计日志行数 (保护次数)
-	protectionCount, err := countLogLines()
+	count, err := countLogLines()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count log lines"})
 		return
 	}
-
-	// 计算剩余禁用时间
-	remainingTime := ""
-	config, err := parseConfig()
-	if err == nil {
-		basic := config["basic"].(map[string]string)
-		if basic["disable"] == "true" {
-			remainingTime = calculateRemainingTime(basic)
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"protection_count": protectionCount,
-		"remaining_time":   remainingTime,
-	})
+	c.JSON(http.StatusOK, gin.H{"protection_count": count})
 }
 
-// 计算剩余禁用时间
-func calculateRemainingTime(basic map[string]string) string {
-	expireHours, err := strconv.ParseFloat(basic["expire_hours"], 64)
-	if err != nil {
-		return "Invalid expire_hours"
-	}
-
-	timestamp, err := strconv.ParseInt(basic["timestamp"], 10, 64)
-	if err != nil {
-		return "Invalid timestamp"
-	}
-
-	// 计算过期时间戳
-	expireSeconds := int64(expireHours * 3600)
-	expireTime := time.Unix(timestamp+expireSeconds, 0)
-	now := time.Now()
-
-	if now.After(expireTime) {
-		return "Expired"
-	}
-
-	// 计算剩余时间
-	duration := expireTime.Sub(now)
-	hours := int(duration.Hours())
-	minutes := int(duration.Minutes()) % 60
-
-	return fmt.Sprintf("%dh %02dm", hours, minutes)
-}
-
-// 统计日志行数
 func countLogLines() (int, error) {
 	file, err := os.Open(LogPath)
 	if err != nil {
 		return 0, err
 	}
 	defer file.Close()
-
 	count := 0
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		count++
 	}
-
 	return count, scanner.Err()
 }
 
-// 解析配置文件获取web设置
-func parseConfigForWebSettings() {
-	file, err := os.Open(ConfigPath)
-	if err != nil {
-		log.Printf("Warning: Could not open config file: %v", err)
-		return
-	}
-	defer file.Close()
+// ============================================================
+// Protected Path Handlers
+// ============================================================
 
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		trimmed := strings.TrimSpace(line)
-
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-
-		if strings.HasPrefix(trimmed, "web_ip=") {
-			parts := strings.SplitN(trimmed, "=", 2)
-			if len(parts) == 2 {
-				webIP = strings.TrimSpace(parts[1])
-			}
-		}
-
-		if strings.HasPrefix(trimmed, "web_port=") {
-			parts := strings.SplitN(trimmed, "=", 2)
-			if len(parts) == 2 {
-				if port, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
-					webPort = port
-				}
-			}
-		}
-	}
-
-	log.Printf("Web settings: IP=%s, Port=%d", webIP, webPort)
-}
-
-// 获取可用语言
-func getLanguagesHandler(c *gin.Context) {
-	languages := []map[string]string{}
-
-	files, err := os.ReadDir(LanguagePath)
+func listProtectedPathsHandler(c *gin.Context) {
+	conf, err := LoadConfig()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(file.Name(), ".ftl") {
-			langCode := strings.TrimSuffix(file.Name(), ".ftl")
-
-			// 从文件读取语言名称
-			content, err := os.ReadFile(filepath.Join(LanguagePath, file.Name()))
-			if err != nil {
-				continue
-			}
-
-			// 解析name字段
-			nameRegex := regexp.MustCompile(`name\s*=\s*"([^"]+)"`)
-			matches := nameRegex.FindStringSubmatch(string(content))
-			var name string
-			if len(matches) > 1 {
-				name = matches[1]
-			} else {
-				name = langCode
-			}
-
-			languages = append(languages, map[string]string{
-				"code": langCode,
-				"name": name,
-			})
-		}
-	}
-
-	c.JSON(http.StatusOK, languages)
+	c.JSON(http.StatusOK, gin.H{"data": conf.Paths.Protect})
 }
 
-// 获取当前配置
-func getConfigHandler(c *gin.Context) {
-	config, err := parseConfig()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+func addProtectedPathHandler(c *gin.Context) {
+	var req struct {
+		Path string `json:"path"`
 	}
-	c.JSON(http.StatusOK, config)
-}
-
-// 更新配置
-func updateConfigHandler(c *gin.Context) {
-	var configData map[string]interface{}
-	if err := c.BindJSON(&configData); err != nil {
+	if err := c.BindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
 		return
 	}
-
-	backupPath := ConfigPath + ".bak." + time.Now().Format("20060102-150405")
-	if err := copyFile(ConfigPath, backupPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create backup: " + err.Error()})
+	if err := AddProtectedPath(req.Path); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{"message": "Path added successfully", "data": gin.H{"path": strings.TrimSpace(req.Path)}})
+}
 
-	if err := updateConfigFile(configData); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update config: " + err.Error()})
+func deleteProtectedPathHandler(c *gin.Context) {
+	path := c.Query("path")
+	if path == "" {
+		var req struct {
+			Path string `json:"path"`
+		}
+		if err := c.BindJSON(&req); err == nil {
+			path = req.Path
+		}
+	}
+	if err := RemoveProtectedPath(path); err != nil {
+		status := http.StatusBadRequest
+		if err.Error() == "path not found" {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
-
-	parseConfigForWebSettings()
-
-	c.JSON(http.StatusOK, gin.H{"message": "Configuration updated successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Path removed successfully"})
 }
 
-// 解析配置文件
-func parseConfig() (map[string]interface{}, error) {
-    config := make(map[string]interface{})
-    basicConfig := make(map[string]string)
-    protectedPaths := []string{}
-    commandRules := []string{}
+// ============================================================
+// Command Rule Handlers
+// ============================================================
 
-    file, err := os.Open(ConfigPath)
-    if err != nil {
-        return nil, err
-    }
-    defer file.Close()
-
-    scanner := bufio.NewScanner(file)
-    currentSection := ""
-
-    for scanner.Scan() {
-        line := scanner.Text()
-        trimmed := strings.TrimSpace(line)
-
-        if trimmed == "" {
-            continue
-        }
-
-        // 识别 section 开始: 宽松匹配关键字
-        if strings.Contains(trimmed, "protected_paths_list") {
-            currentSection = "protected_paths_list"
-            continue
-        }
-        if strings.Contains(trimmed, "command_intercept_rules") {
-            currentSection = "command_intercept_rules"
-            continue
-        }
-
-        // 基本配置项 (格式 key=value 且不是注释)
-        if strings.Contains(trimmed, "=") && !strings.HasPrefix(trimmed, "#") {
-            parts := strings.SplitN(trimmed, "=", 2)
-            key := strings.TrimSpace(parts[0])
-            value := strings.TrimSpace(parts[1])
-
-            switch key {
-            case "language", "disable", "expire_hours", "timestamp", "update", "mode", "web_ip", "web_port":
-                basicConfig[key] = value
-            }
-            // 如果在某些 section 也可能含有 = 但你不希望它当作 basic, 可以进一步区分
-            continue
-        }
-
-        // 依据当前 section 追加
-        if currentSection == "protected_paths_list" {
-            if !strings.HasPrefix(trimmed, "#") && trimmed != "" {
-                protectedPaths = append(protectedPaths, trimmed)
-            }
-        } else if currentSection == "command_intercept_rules" {
-            if !strings.HasPrefix(trimmed, "#") && trimmed != "" {
-                commandRules = append(commandRules, trimmed)
-            }
-        }
-    }
-
-    if err := scanner.Err(); err != nil {
-        return nil, err
-    }
-
-    config["basic"] = basicConfig
-    config["protected_paths"] = protectedPaths
-    config["command_rules"] = commandRules
-
-    return config, nil
+func listCommandRulesHandler(c *gin.Context) {
+	conf, err := LoadConfig()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": conf.Rules})
 }
 
-// 更新配置文件
-func updateConfigFile(newConfig map[string]interface{}) error {
-    content, err := os.ReadFile(ConfigPath)
-    if err != nil {
-        return err
-    }
-    lines := strings.Split(string(content), "\n")
-
-    // 更新基本配置项 (如果提供)
-    if basic, ok := newConfig["basic"].(map[string]interface{}); ok {
-       	for i, line := range lines {
-            trimmed := strings.TrimSpace(line)
-            if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-                continue
-            }
-            if strings.Contains(trimmed, "=") {
-                parts := strings.SplitN(trimmed, "=", 2)
-                key := strings.TrimSpace(parts[0])
-                if newValue, exists := basic[key]; exists {
-                    valueStr := fmt.Sprintf("%v", newValue)
-                    lines[i] = fmt.Sprintf("%s=%s", key, valueStr)
-                }
-            }
-        }
-    }
-
-    // Helper to replace or insert a section
-   	replaceSection := func(sectionKey string, newItems []string) {
-        startIdx := -1
-        endIdx := -1
-
-        // 定位 section 开头 (包含关键字), 例如包含 "protected_paths_list"
-        for i, line := range lines {
-            if strings.Contains(line, sectionKey) {
-                startIdx = i
-                break
-            }
-        }
-
-        if startIdx == -1 {
-            // section 不存在, 跳过 (也可以选择插入整个 section 模板)
-           	log.Printf("Warning: section %s not found in config file; skipping update for it", sectionKey)
-            return
-        }
-
-        // 查找下一个显式的 section 开头 (可能是另一个关键字)或文件末尾, 作为 endIdx (不包含它)
-        for i := startIdx + 1; i < len(lines); i++ {
-            if strings.Contains(lines[i], "protected_paths_list") || strings.Contains(lines[i], "command_intercept_rules") {
-                endIdx = i
-                break
-            }
-        }
-        if endIdx == -1 {
-            // 到文件末尾
-            endIdx = len(lines)
-        }
-
-        // 保留 section header line
-        newSection := []string{lines[startIdx]}
-        // 插入新的内容 (如果有)
-        for _, item := range newItems {
-            newSection = append(newSection, item)
-        }
-
-        // 重建 lines: 替换旧 section 内容 (包含旧 items, 但不包括下一个 section header)
-        lines = append(lines[:startIdx], append(newSection, lines[endIdx:]...)...)
-    }
-
-    // 处理 protected_paths
-    if pathsIface, ok := newConfig["protected_paths"].([]interface{}); ok {
-        newPaths := []string{}
-        for _, p := range pathsIface {
-            if str, ok := p.(string); ok {
-                newPaths = append(newPaths, str)
-            }
-        }
-        replaceSection("protected_paths_list", newPaths)
-    }
-
-    // 处理 command_rules
-    if rulesIface, ok := newConfig["command_rules"].([]interface{}); ok {
-        newRules := []string{}
-        for _, r := range rulesIface {
-            if str, ok := r.(string); ok {
-                newRules = append(newRules, str)
-            }
-        }
-        replaceSection("command_intercept_rules", newRules)
-    }
-
-    // 写入更新后的配置 (确保以换行结尾)
-   	out := strings.Join(lines, "\n")
-    if !strings.HasSuffix(out, "\n") {
-        out += "\n"
-    }
-    return os.WriteFile(ConfigPath, []byte(out), 0644)
+func addCommandRuleHandler(c *gin.Context) {
+	var input AddRuleInput
+	if err := c.BindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+	rule, err := AddCommandRule(&input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Rule created successfully", "data": rule})
 }
 
+func putCommandRuleHandler(c *gin.Context) {
+	id := c.Param("id")
+	var input AddRuleInput
+	if err := c.BindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+	rule, err := FullUpdateCommandRule(id, &input)
+	if err != nil {
+		status := http.StatusBadRequest
+		if err.Error() == "rule not found" {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Rule updated successfully", "data": rule})
+}
 
-// 流式日志
+func patchCommandRuleHandler(c *gin.Context) {
+	id := c.Param("id")
+	var input UpdateRuleInput
+	if err := c.BindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+	rule, err := PatchCommandRule(id, &input)
+	if err != nil {
+		status := http.StatusBadRequest
+		if err.Error() == "rule not found" {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Rule patched successfully", "data": rule})
+}
+
+func deleteCommandRuleHandler(c *gin.Context) {
+	id := c.Param("id")
+	if err := DeleteCommandRule(id); err != nil {
+		status := http.StatusBadRequest
+		if err.Error() == "rule not found" {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Rule deleted successfully"})
+}
+
+// ============================================================
+// Log Stream Handler (SSE)
+// ============================================================
+
 func logStreamHandler(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Writer.Flush()
 
-	// 打开日志文件
 	file, err := os.Open(LogPath)
 	if err != nil {
 		c.SSEvent("error", fmt.Sprintf("Error opening log file: %v", err))
@@ -435,18 +759,14 @@ func logStreamHandler(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// 1. 发送完整的历史日志
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		c.SSEvent("log", scanner.Text())
-		c.Writer.Flush()
+		sendLogLine(c, scanner.Text())
 	}
 
-	// 获取当前文件位置 (文件末尾)
 	lastPos, _ := file.Seek(0, io.SeekCurrent)
 	lastSize := lastPos
 
-	// 使用ticker定期检查新日志
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -457,56 +777,38 @@ func logStreamHandler(c *gin.Context) {
 		case <-clientGone:
 			return
 		case <-ticker.C:
-			// 检查文件是否有新内容
 			fileInfo, err := os.Stat(LogPath)
 			if err != nil {
 				c.SSEvent("error", fmt.Sprintf("Error getting file info: %v", err))
 				continue
 			}
-
 			currentSize := fileInfo.Size()
 			if currentSize < lastSize {
-				// 文件被截断或轮转, 重置位置并重新发送完整日志
+				// Log was rotated; reopen from the beginning.
 				lastPos = 0
 				lastSize = currentSize
-
-				// 重新打开文件读取完整内容
 				file.Close()
 				file, err = os.Open(LogPath)
 				if err != nil {
 					c.SSEvent("error", fmt.Sprintf("Error reopening log file: %v", err))
 					return
 				}
-
 				scanner = bufio.NewScanner(file)
 				for scanner.Scan() {
-					c.SSEvent("log", scanner.Text())
-					c.Writer.Flush()
+					sendLogLine(c, scanner.Text())
 				}
 				lastPos, _ = file.Seek(0, io.SeekCurrent)
 				lastSize = lastPos
 				continue
 			}
-
 			if currentSize <= lastPos {
-				// 没有新内容
 				continue
 			}
-
-			// 读取新内容
-			_, err = file.Seek(lastPos, io.SeekStart)
-			if err != nil {
-				c.SSEvent("error", fmt.Sprintf("Error seeking file: %v", err))
-				continue
-			}
-
+			file.Seek(lastPos, io.SeekStart)
 			scanner = bufio.NewScanner(file)
 			for scanner.Scan() {
-				c.SSEvent("log", scanner.Text())
-				c.Writer.Flush()
+				sendLogLine(c, scanner.Text())
 			}
-
-			// 更新位置
 			newPos, _ := file.Seek(0, io.SeekCurrent)
 			lastPos = newPos
 			lastSize = currentSize
@@ -514,86 +816,253 @@ func logStreamHandler(c *gin.Context) {
 	}
 }
 
-// 重新加载配置
-func reloadHandler(c *gin.Context) {
-	cmd := exec.Command("dplauncher", "--reload")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to reload",
-			"details": string(output),
-		})
-		return
+func sendLogLine(c *gin.Context, rawLine string) {
+	var entry LogEntry
+	if err := json.Unmarshal([]byte(rawLine), &entry); err == nil {
+		c.SSEvent("log", formatLogEntry(&entry))
+	} else {
+		c.SSEvent("log", rawLine)
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Configuration reloaded", "output": string(output)})
+	c.Writer.Flush()
 }
 
-// 重启服务
-func restartHandler(c *gin.Context) {
-	cmd := exec.Command("systemctl", "restart", "deeprotection")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to restart",
-			"details": string(output),
-		})
-		return
+func formatLogEntry(entry *LogEntry) string {
+	t, err := time.Parse(time.RFC3339, entry.Timestamp)
+	timeStr := entry.Timestamp
+	if err == nil {
+		timeStr = t.Format("2006-01-02 15:04:05")
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Service restarted", "output": string(output)})
+	return fmt.Sprintf("[%s] %s - user %s executed \"%s\" (mode: %s, pid: %d) - %s",
+		timeStr, entry.Level, entry.User, entry.Command, entry.Mode, entry.PID, entry.Message)
 }
 
-// 执行自定义命令
-func commandHandler(c *gin.Context) {
-	var request struct {
-		Command string `json:"command"`
-	}
+// ============================================================
+// Plugins
+// ============================================================
 
-	if err := c.BindJSON(&request); err != nil {
+// PluginMeta 对应 plugin.json
+type PluginMeta struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Author      string `json:"author"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	Entrypoint  string `json:"entrypoint"`
+	Type        string `json:"type"`
+}
+
+// 插件根目录
+const PluginsPath = "/etc/deeprotection/plugins"
+
+// 获取所有已安装插件
+func ListPlugins() ([]PluginMeta, error) {
+	entries, err := os.ReadDir(PluginsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []PluginMeta{}, nil
+		}
+		return nil, err
+	}
+	var plugins []PluginMeta
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		metaPath := filepath.Join(PluginsPath, entry.Name(), "plugin.json")
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+		var meta PluginMeta
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		plugins = append(plugins, meta)
+	}
+	return plugins, nil
+}
+
+// 保存插件元数据
+func SavePluginMeta(pluginDir string, meta *PluginMeta) error {
+	metaPath := filepath.Join(pluginDir, "plugin.json")
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(metaPath, data, 0644)
+}
+
+// 切换插件启用状态
+func TogglePlugin(id string, enabled bool) error {
+	plugins, err := ListPlugins()
+	if err != nil {
+		return err
+	}
+	for _, p := range plugins {
+		if p.ID == id {
+			p.Enabled = enabled
+			pluginDir := filepath.Join(PluginsPath, id)
+			return SavePluginMeta(pluginDir, &p)
+		}
+	}
+	return fmt.Errorf("plugin not found")
+}
+
+// 删除插件目录
+func DeletePlugin(id string) error {
+	pluginDir := filepath.Join(PluginsPath, id)
+	return os.RemoveAll(pluginDir)
+}
+
+// GET /api/plugins
+func listPluginsHandler(c *gin.Context) {
+	plugins, err := ListPlugins()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": plugins})
+}
+
+// POST /api/plugins/toggle
+func togglePluginHandler(c *gin.Context) {
+	var req struct {
+		ID      string `json:"id"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := c.BindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
-
-	if request.Command == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Command cannot be empty"})
+	if err := TogglePlugin(req.ID, req.Enabled); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	parts := strings.Fields(request.Command)
-	if len(parts) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid command"})
-		return
-	}
-
-	cmd := exec.Command(parts[0], parts[1:]...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Command failed",
-			"details": string(output),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Command executed",
-		"output":  string(output),
-	})
+	c.JSON(http.StatusOK, gin.H{"message": "Plugin toggled"})
 }
 
-// 复制文件用于备份
-func copyFile(src, dst string) error {
-	source, err := os.Open(src)
-	if err != nil {
-		return err
+// DELETE /api/plugins/:id
+func deletePluginHandler(c *gin.Context) {
+	id := c.Param("id")
+	if err := DeletePlugin(id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
-	defer source.Close()
+	c.JSON(http.StatusOK, gin.H{"message": "Plugin deleted"})
+}
 
-	destination, err := os.Create(dst)
+// POST /api/plugins/install
+// 安装插件：接收 ZIP 包，校验并解压至插件目录
+func installPluginHandler(c *gin.Context) {
+	file, header, err := c.Request.FormFile("plugin")
 	if err != nil {
-		return err
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing plugin file"})
+		return
 	}
-	defer destination.Close()
+	defer file.Close()
 
-	_, err = io.Copy(destination, source)
-	return err
+	if !strings.HasSuffix(strings.ToLower(header.Filename), ".zip") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only .zip files are allowed"})
+		return
+	}
+
+	zipData, err := io.ReadAll(file)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read uploaded file"})
+		return
+	}
+
+	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid zip archive"})
+		return
+	}
+
+	var meta PluginMeta
+	metaFound := false
+	for _, f := range zipReader.File {
+		if f.Name == "plugin.json" {
+			rc, err := f.Open()
+			if err != nil {
+				continue
+			}
+			data, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				continue
+			}
+			if err := json.Unmarshal(data, &meta); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid plugin.json: " + err.Error()})
+				return
+			}
+			metaFound = true
+			break
+		}
+	}
+	if !metaFound {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugin.json not found in archive root"})
+		return
+	}
+
+	if meta.ID == "" || meta.Name == "" || meta.Version == "" || meta.Entrypoint == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugin.json missing required fields (id, name, version, entrypoint)"})
+		return
+	}
+
+	pluginDir := filepath.Join(PluginsPath, meta.ID)
+	if _, err := os.Stat(pluginDir); err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Plugin with this ID already exists"})
+		return
+	}
+
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create plugin directory"})
+		return
+	}
+
+	for _, f := range zipReader.File {
+		name := filepath.Clean(f.Name)
+		if strings.Contains(name, "..") {
+			continue
+		}
+		targetPath := filepath.Join(pluginDir, name)
+		rel, err := filepath.Rel(pluginDir, targetPath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			continue
+		}
+
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(targetPath, 0755)
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			continue
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		outFile, err := os.Create(targetPath)
+		if err != nil {
+			rc.Close()
+			continue
+		}
+		_, err = io.Copy(outFile, rc)
+		outFile.Close()
+		rc.Close()
+		if err != nil {
+			// ignore individual file write errors
+		}
+	}
+
+	meta.Enabled = true
+	if err := SavePluginMeta(pluginDir, &meta); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save plugin metadata"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Plugin installed successfully", "data": meta})
 }
