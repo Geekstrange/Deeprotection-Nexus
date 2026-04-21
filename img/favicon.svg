@@ -3,30 +3,28 @@
   <defs>
     <style>
       .cls-1 {
-        fill: url(#_未命名的渐变_3);
+        fill: url(#_未命名的渐变);
       }
 
       .cls-2 {
-        fill: url(#_未命名的渐变_4);
+        fill: url(#_未命名的渐变_2);
       }
     </style>
-    <linearGradient id="_未命名的渐变_4" data-name="未命名的渐变 4" x1="45.6" y1="65.9" x2="163.1" y2="139.6" gradientUnits="userSpaceOnUse">
+    <linearGradient id="_未命名的渐变" data-name="未命名的渐变" x1="45.6" y1="136.1" x2="163.1" y2="62.4" gradientTransform="translate(0 202) scale(1 -1)" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#0ea5e9"/>
       <stop offset="1" stop-color="#67e8f9"/>
     </linearGradient>
-    <linearGradient id="_未命名的渐变_3" data-name="未命名的渐变 3" x1="76" y1="85.2" x2="148.3" y2="130.7" gradientUnits="userSpaceOnUse">
+    <linearGradient id="_未命名的渐变_2" data-name="未命名的渐变 2" x1="76" y1="116.8" x2="148.3" y2="71.3" gradientTransform="translate(0 202) scale(1 -1)" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#0ea5e9"/>
       <stop offset="1" stop-color="#67e8f9"/>
     </linearGradient>
   </defs>
   <!-- Generator: Adobe Illustrator 28.7.1, SVG Export Plug-In . SVG Version: 1.2.0 Build 142)  -->
   <g>
-    <g id="_图层_1" data-name="图层_1">
-      <g id="_图层_1-2" data-name="_图层_1">
-        <g>
-          <path class="cls-2" d="M169.3,60.3L99.9,20.5,30.6,60.2v79.5l69.5,39.8,69.3-39.6V60.3h0ZM157.4,133.4l-57.3,33.3-57.4-33.4v-66.7l57.3-33.3,57.4,33.4v66.7Z"/>
-          <path class="cls-1" d="M60.1,84.5l35,20.1v40.1c0,2.9,2.3,5.2,5.2,5.2s5.2-2.3,5.2-5.2v-40.2l34.9-20.1c2.5-1.4,3.3-4.6,1.9-7.1h0c-1.4-2.5-4.6-3.3-7.1-1.9l-35,20.1-35-20.1c-2.5-1.4-5.6-.6-7,1.9s-.6,5.6,1.9,7.1h0Z"/>
-        </g>
+    <g id="main">
+      <g id="group">
+        <path id="bg" class="cls-1" d="M169.3,60.3L99.9,20.5,30.6,60.2v79.5l69.5,39.8,69.3-39.6V60.3h0ZM157.4,133.4l-57.3,33.3-57.4-33.4v-66.7l57.3-33.3,57.4,33.4v66.7Z"/>
+        <path id="fg" class="cls-2" d="M60.1,84.5l35,20.1v40.1c0,2.9,2.3,5.2,5.2,5.2s5.2-2.3,5.2-5.2v-40.2l34.9-20.1c2.5-1.4,3.3-4.6,1.9-7.1h0c-1.4-2.5-4.6-3.3-7.1-1.9l-35,20.1-35-20.1c-2.5-1.4-5.6-.6-7,1.9s-.6,5.6,1.9,7.1h0Z"/>
       </g>
     </g>
   </g>

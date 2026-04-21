@@ -1,3 +1,4 @@
+// main.go
 package main
 
 import (
@@ -35,9 +36,8 @@ func init() {
 var staticFS embed.FS
 
 const (
-	ConfigPath  = "/etc/deeprotection/config.toml"
-	LogPath     = "/var/log/audit.log"
-
+	ConfigPath        = "/etc/deeprotection/config.toml"
+	LogPath           = "/var/log/audit.log"
 	SessionCookieName = "dp_session"
 )
 
@@ -53,18 +53,16 @@ type TomlConfig struct {
 }
 
 type CoreConfig struct {
-	Mode     string `toml:"mode" json:"mode"`
+	Mode string `toml:"mode" json:"mode"`
 }
 
-// AuthConfig holds the hashed admin password.
-// Store a SHA-256 hex digest so the plaintext never sits in the file.
-// Example: echo -n "mypassword" | sha256sum
 type AuthConfig struct {
 	PasswordHash string `toml:"password_hash" json:"password_hash"`
 }
 
 type PathsConfig struct {
-	Protect []string `toml:"protect" json:"protect"`
+	Protect   []string `toml:"protect" json:"protect"`
+	Allowlist []string `toml:"allowlist" json:"allowlist"`
 }
 
 type TomlRule struct {
@@ -80,7 +78,6 @@ type RuleAction struct {
 	Replace *string `toml:"replace,omitempty" json:"replace,omitempty"`
 }
 
-// LogEntry corresponds to the JSON structure emitted by the Rust logger.
 type LogEntry struct {
 	Timestamp  string `json:"timestamp"`
 	Level      string `json:"level"`
@@ -97,7 +94,6 @@ type LogEntry struct {
 // API Input Types
 // ============================================================
 
-// AddRuleInput is used for POST and PUT /api/command-rules.
 type AddRuleInput struct {
 	Pattern string     `json:"pattern"`
 	Action  RuleAction `json:"action"`
@@ -105,7 +101,6 @@ type AddRuleInput struct {
 	Enabled *bool      `json:"enabled"`
 }
 
-// UpdateRuleInput is used for PATCH /api/command-rules/:id (partial update).
 type UpdateRuleInput struct {
 	Pattern *string     `json:"pattern"`
 	Action  *RuleAction `json:"action"`
@@ -117,22 +112,17 @@ type UpdateRuleInput struct {
 // Auth Helpers
 // ============================================================
 
-// hashPassword returns the hex-encoded SHA-256 digest of the input.
 func hashPassword(password string) string {
 	sum := sha256.Sum256([]byte(password))
 	return hex.EncodeToString(sum[:])
 }
 
-// generateSessionToken creates a random 32-byte hex token.
 func generateSessionToken() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
-// In-memory session store: token -> expiry time.
-// For production you would use Redis or a signed JWT; this is intentionally
-// simple to keep the dependency footprint minimal.
 var sessions = map[string]time.Time{}
 
 func createSession() string {
@@ -160,7 +150,6 @@ func deleteSession(token string) {
 	delete(sessions, token)
 }
 
-// authMiddleware rejects API requests that don't carry a valid session cookie.
 func authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token, _ := c.Cookie(SessionCookieName)
@@ -176,8 +165,6 @@ func authMiddleware() gin.HandlerFunc {
 // Auth Handlers
 // ============================================================
 
-// POST /api/login
-// Body: { "password": "..." }
 func loginHandler(c *gin.Context) {
 	var req struct {
 		Password string `json:"password"`
@@ -194,7 +181,6 @@ func loginHandler(c *gin.Context) {
 	}
 
 	if conf.Auth.PasswordHash == "" {
-		// No password configured — set the first password supplied as the hash.
 		conf.Auth.PasswordHash = hashPassword(req.Password)
 		if err := SaveConfig(conf); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save configuration"})
@@ -210,7 +196,6 @@ func loginHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Login successful"})
 }
 
-// POST /api/logout
 func logoutHandler(c *gin.Context) {
 	token, _ := c.Cookie(SessionCookieName)
 	deleteSession(token)
@@ -218,10 +203,46 @@ func logoutHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out"})
 }
 
-// GET /api/auth/status — lets the frontend check whether the session is alive.
 func authStatusHandler(c *gin.Context) {
 	token, _ := c.Cookie(SessionCookieName)
 	c.JSON(http.StatusOK, gin.H{"authenticated": isValidSession(token)})
+}
+
+// POST /api/change-password
+func changePasswordHandler(c *gin.Context) {
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	if req.NewPassword == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "New password cannot be empty"})
+		return
+	}
+
+	conf, err := LoadConfig()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load configuration"})
+		return
+	}
+
+	if conf.Auth.PasswordHash != "" {
+		if hashPassword(req.OldPassword) != conf.Auth.PasswordHash {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Old password is incorrect"})
+			return
+		}
+	}
+
+	conf.Auth.PasswordHash = hashPassword(req.NewPassword)
+	if err := SaveConfig(conf); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save configuration"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Password changed successfully"})
 }
 
 // ============================================================
@@ -238,7 +259,6 @@ func generateRuleName() string {
 	return fmt.Sprintf("rule_%d_%s", time.Now().Unix(), generateID()[:4])
 }
 
-// LoadConfig reads and decodes the TOML configuration file.
 func LoadConfig() (*TomlConfig, error) {
 	var conf TomlConfig
 	if _, err := toml.DecodeFile(ConfigPath, &conf); err != nil {
@@ -247,16 +267,21 @@ func LoadConfig() (*TomlConfig, error) {
 	if conf.Paths.Protect == nil {
 		conf.Paths.Protect = []string{}
 	}
+	if conf.Paths.Allowlist == nil {
+		conf.Paths.Allowlist = []string{}
+	}
 	if conf.Rules == nil {
 		conf.Rules = []TomlRule{}
 	}
 	return &conf, nil
 }
 
-// SaveConfig performs an atomic write: encode to a temp file, then rename into place.
 func SaveConfig(conf *TomlConfig) error {
 	if conf.Paths.Protect == nil {
 		conf.Paths.Protect = []string{}
+	}
+	if conf.Paths.Allowlist == nil {
+		conf.Paths.Allowlist = []string{}
 	}
 	if conf.Rules == nil {
 		conf.Rules = []TomlRule{}
@@ -283,7 +308,6 @@ func SaveConfig(conf *TomlConfig) error {
 	return nil
 }
 
-// normalizeAction ensures exactly one of block or replace is set; defaults to block:true.
 func normalizeAction(a RuleAction) RuleAction {
 	if a.Replace != nil {
 		s := strings.TrimSpace(*a.Replace)
@@ -297,7 +321,7 @@ func normalizeAction(a RuleAction) RuleAction {
 	return a
 }
 
-// AddProtectedPath adds a path after validation and deduplication.
+// Protected paths
 func AddProtectedPath(path string) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -319,7 +343,6 @@ func AddProtectedPath(path string) error {
 	return SaveConfig(conf)
 }
 
-// RemoveProtectedPath removes a path by exact value match.
 func RemoveProtectedPath(path string) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -345,7 +368,51 @@ func RemoveProtectedPath(path string) error {
 	return SaveConfig(conf)
 }
 
-// AddCommandRule creates a new rule, assigns ID and default name, then persists.
+// Command allowlist
+func AddAllowlistCommand(cmd string) error {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return fmt.Errorf("command cannot be empty")
+	}
+	conf, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	for _, c := range conf.Paths.Allowlist {
+		if c == cmd {
+			return fmt.Errorf("command already exists in allowlist")
+		}
+	}
+	conf.Paths.Allowlist = append(conf.Paths.Allowlist, cmd)
+	return SaveConfig(conf)
+}
+
+func RemoveAllowlistCommand(cmd string) error {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return fmt.Errorf("command cannot be empty")
+	}
+	conf, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	newList := make([]string, 0, len(conf.Paths.Allowlist))
+	found := false
+	for _, c := range conf.Paths.Allowlist {
+		if c == cmd {
+			found = true
+			continue
+		}
+		newList = append(newList, c)
+	}
+	if !found {
+		return fmt.Errorf("command not found in allowlist")
+	}
+	conf.Paths.Allowlist = newList
+	return SaveConfig(conf)
+}
+
+// Command rules
 func AddCommandRule(input *AddRuleInput) (*TomlRule, error) {
 	pattern := strings.TrimSpace(input.Pattern)
 	if pattern == "" {
@@ -380,7 +447,6 @@ func AddCommandRule(input *AddRuleInput) (*TomlRule, error) {
 	return &rule, nil
 }
 
-// FullUpdateCommandRule replaces a rule's fields entirely (PUT semantics).
 func FullUpdateCommandRule(id string, input *AddRuleInput) (*TomlRule, error) {
 	conf, err := LoadConfig()
 	if err != nil {
@@ -418,7 +484,6 @@ func FullUpdateCommandRule(id string, input *AddRuleInput) (*TomlRule, error) {
 	return nil, fmt.Errorf("rule not found")
 }
 
-// PatchCommandRule applies a partial update to a rule (PATCH semantics).
 func PatchCommandRule(id string, input *UpdateRuleInput) (*TomlRule, error) {
 	conf, err := LoadConfig()
 	if err != nil {
@@ -453,7 +518,6 @@ func PatchCommandRule(id string, input *UpdateRuleInput) (*TomlRule, error) {
 	return nil, fmt.Errorf("rule not found")
 }
 
-// DeleteCommandRule removes a rule by ID.
 func DeleteCommandRule(id string) error {
 	conf, err := LoadConfig()
 	if err != nil {
@@ -490,7 +554,6 @@ func main() {
 	}
 	r.Use(static.Serve("/", embeddedStaticFS))
 
-	// Serve the login page at /login (must be in public/login.html via embed).
 	r.GET("/login", func(c *gin.Context) {
 		token, _ := c.Cookie(SessionCookieName)
 		if isValidSession(token) {
@@ -502,35 +565,33 @@ func main() {
 
 	api := r.Group("/api")
 	{
-		// Public auth endpoints — no session required.
 		api.POST("/login", loginHandler)
 		api.POST("/logout", logoutHandler)
 		api.GET("/auth/status", authStatusHandler)
 
-		// All remaining API routes require a valid session.
 		protected := api.Group("/", authMiddleware())
 		{
-			// Unified config view (GET) and global settings update (POST, mode only).
 			protected.GET("/config", getConfigHandler)
 			protected.POST("/config", updateBasicConfigHandler)
+			protected.POST("/change-password", changePasswordHandler)
 
-			// Stats and logs.
 			protected.GET("/stats", getStatsHandler)
 			protected.GET("/logs", logStreamHandler)
 
-			// Protected paths management.
 			protected.GET("/protected-paths", listProtectedPathsHandler)
 			protected.POST("/protected-paths", addProtectedPathHandler)
 			protected.DELETE("/protected-paths", deleteProtectedPathHandler)
 
-			// Command rules management.
+			protected.GET("/command-allowlist", listAllowlistHandler)
+			protected.POST("/command-allowlist", addAllowlistHandler)
+			protected.DELETE("/command-allowlist", deleteAllowlistHandler)
+
 			protected.GET("/command-rules", listCommandRulesHandler)
 			protected.POST("/command-rules", addCommandRuleHandler)
 			protected.PUT("/command-rules/:id", putCommandRuleHandler)
 			protected.PATCH("/command-rules/:id", patchCommandRuleHandler)
 			protected.DELETE("/command-rules/:id", deleteCommandRuleHandler)
 
-			// Plugin
 			protected.GET("/plugins", listPluginsHandler)
 			protected.POST("/plugins/toggle", togglePluginHandler)
 			protected.DELETE("/plugins/:id", deletePluginHandler)
@@ -555,14 +616,13 @@ func getConfigHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"basic":           gin.H{"mode": conf.Core.Mode},
-		"protected_paths": conf.Paths.Protect,
-		"command_rules":   conf.Rules,
+		"basic":             gin.H{"mode": conf.Core.Mode},
+		"protected_paths":   conf.Paths.Protect,
+		"command_allowlist": conf.Paths.Allowlist,
+		"command_rules":     conf.Rules,
 	})
 }
 
-// updateBasicConfigHandler handles only global settings such as mode.
-// Bulk rule/path updates via this endpoint are removed; use the dedicated endpoints instead.
 func updateBasicConfigHandler(c *gin.Context) {
 	var req map[string]interface{}
 	if err := c.BindJSON(&req); err != nil {
@@ -662,6 +722,55 @@ func deleteProtectedPathHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Path removed successfully"})
+}
+
+// ============================================================
+// Command Allowlist Handlers
+// ============================================================
+
+func listAllowlistHandler(c *gin.Context) {
+	conf, err := LoadConfig()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": conf.Paths.Allowlist})
+}
+
+func addAllowlistHandler(c *gin.Context) {
+	var req struct {
+		Command string `json:"command"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+	if err := AddAllowlistCommand(req.Command); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Command added to allowlist", "data": gin.H{"command": strings.TrimSpace(req.Command)}})
+}
+
+func deleteAllowlistHandler(c *gin.Context) {
+	cmd := c.Query("command")
+	if cmd == "" {
+		var req struct {
+			Command string `json:"command"`
+		}
+		if err := c.BindJSON(&req); err == nil {
+			cmd = req.Command
+		}
+	}
+	if err := RemoveAllowlistCommand(cmd); err != nil {
+		status := http.StatusBadRequest
+		if err.Error() == "command not found in allowlist" {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Command removed from allowlist"})
 }
 
 // ============================================================
@@ -784,7 +893,6 @@ func logStreamHandler(c *gin.Context) {
 			}
 			currentSize := fileInfo.Size()
 			if currentSize < lastSize {
-				// Log was rotated; reopen from the beginning.
 				lastPos = 0
 				lastSize = currentSize
 				file.Close()
@@ -840,7 +948,6 @@ func formatLogEntry(entry *LogEntry) string {
 // Plugins
 // ============================================================
 
-// PluginMeta 对应 plugin.json
 type PluginMeta struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -852,10 +959,8 @@ type PluginMeta struct {
 	Type        string `json:"type"`
 }
 
-// 插件根目录
 const PluginsPath = "/etc/deeprotection/plugins"
 
-// 获取所有已安装插件
 func ListPlugins() ([]PluginMeta, error) {
 	entries, err := os.ReadDir(PluginsPath)
 	if err != nil {
@@ -883,7 +988,6 @@ func ListPlugins() ([]PluginMeta, error) {
 	return plugins, nil
 }
 
-// 保存插件元数据
 func SavePluginMeta(pluginDir string, meta *PluginMeta) error {
 	metaPath := filepath.Join(pluginDir, "plugin.json")
 	data, err := json.MarshalIndent(meta, "", "  ")
@@ -893,7 +997,6 @@ func SavePluginMeta(pluginDir string, meta *PluginMeta) error {
 	return os.WriteFile(metaPath, data, 0644)
 }
 
-// 切换插件启用状态
 func TogglePlugin(id string, enabled bool) error {
 	plugins, err := ListPlugins()
 	if err != nil {
@@ -909,13 +1012,11 @@ func TogglePlugin(id string, enabled bool) error {
 	return fmt.Errorf("plugin not found")
 }
 
-// 删除插件目录
 func DeletePlugin(id string) error {
 	pluginDir := filepath.Join(PluginsPath, id)
 	return os.RemoveAll(pluginDir)
 }
 
-// GET /api/plugins
 func listPluginsHandler(c *gin.Context) {
 	plugins, err := ListPlugins()
 	if err != nil {
@@ -925,7 +1026,6 @@ func listPluginsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": plugins})
 }
 
-// POST /api/plugins/toggle
 func togglePluginHandler(c *gin.Context) {
 	var req struct {
 		ID      string `json:"id"`
@@ -942,7 +1042,6 @@ func togglePluginHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Plugin toggled"})
 }
 
-// DELETE /api/plugins/:id
 func deletePluginHandler(c *gin.Context) {
 	id := c.Param("id")
 	if err := DeletePlugin(id); err != nil {
@@ -952,8 +1051,6 @@ func deletePluginHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Plugin deleted"})
 }
 
-// POST /api/plugins/install
-// 安装插件：接收 ZIP 包，校验并解压至插件目录
 func installPluginHandler(c *gin.Context) {
 	file, header, err := c.Request.FormFile("plugin")
 	if err != nil {
@@ -1054,7 +1151,6 @@ func installPluginHandler(c *gin.Context) {
 		outFile.Close()
 		rc.Close()
 		if err != nil {
-			// ignore individual file write errors
 		}
 	}
 

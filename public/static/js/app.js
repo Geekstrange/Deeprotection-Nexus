@@ -1,3 +1,4 @@
+// app.js
 document.addEventListener('DOMContentLoaded', function () {
     // ============================================================
     // Auth guard — redirect to /login if not authenticated
@@ -27,11 +28,81 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // ============================================================
+    // Password Change Modal
+    // ============================================================
+    const modal = document.getElementById('password-modal');
+    const changeBtn = document.getElementById('change-password-btn');
+    const closeBtn = document.getElementById('close-password-modal');
+    const cancelBtn = document.getElementById('cancel-password');
+    const submitBtn = document.getElementById('submit-password');
+    const oldPass = document.getElementById('old-password');
+    const newPass = document.getElementById('new-password');
+    const confirmPass = document.getElementById('confirm-password');
+    const errorDiv = document.getElementById('password-error');
+
+    if (changeBtn) {
+        changeBtn.addEventListener('click', () => {
+            modal.style.display = 'flex';
+            oldPass.value = '';
+            newPass.value = '';
+            confirmPass.value = '';
+            errorDiv.textContent = '';
+        });
+    }
+
+    function closeModal() {
+        modal.style.display = 'none';
+    }
+
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+    window.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+
+    if (submitBtn) {
+        submitBtn.addEventListener('click', async () => {
+            errorDiv.textContent = '';
+            const old = oldPass.value;
+            const newP = newPass.value;
+            const confirm = confirmPass.value;
+
+            if (!old) {
+                errorDiv.textContent = 'Current password is required';
+                return;
+            }
+            if (!newP) {
+                errorDiv.textContent = 'New password cannot be empty';
+                return;
+            }
+            if (newP !== confirm) {
+                errorDiv.textContent = 'New passwords do not match';
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ old_password: old, new_password: newP })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Password change failed');
+                Toast.success('Password changed successfully');
+                closeModal();
+            } catch (err) {
+                errorDiv.textContent = err.message;
+            }
+        });
+    }
+
+    // ============================================================
     // State
     // ============================================================
     let currentConfig = null;
     let currentRules = [];
     let currentPaths = [];
+    let currentAllowlist = [];
 
     // ============================================================
     // Navigation
@@ -80,6 +151,18 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    async function fetchPlugins() {
+        try {
+            const res = await fetch('/api/plugins');
+            if (res.status === 401) { window.location.href = '/login'; return { data: [] }; }
+            if (!res.ok) throw new Error('Failed to fetch plugins');
+            return await res.json();
+        } catch (err) {
+            console.error(err);
+            return { data: [] };
+        }
+    }
+
     async function updateBasicConfig(config) {
         try {
             const res = await fetch('/api/config', {
@@ -119,6 +202,35 @@ document.addEventListener('DOMContentLoaded', function () {
         if (res.status === 401) { window.location.href = '/login'; return; }
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to delete path');
+        return data;
+    }
+
+    async function fetchAllowlist() {
+        const res = await fetch('/api/command-allowlist');
+        if (res.status === 401) { window.location.href = '/login'; return []; }
+        const data = await res.json();
+        return data.data || [];
+    }
+
+    async function apiAddAllowlistCommand(cmd) {
+        const res = await fetch('/api/command-allowlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: cmd })
+        });
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to add command');
+        return data;
+    }
+
+    async function apiDeleteAllowlistCommand(cmd) {
+        const res = await fetch(`/api/command-allowlist?command=${encodeURIComponent(cmd)}`, {
+            method: 'DELETE'
+        });
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to delete command');
         return data;
     }
 
@@ -181,6 +293,13 @@ document.addEventListener('DOMContentLoaded', function () {
         if (el) el.textContent = stats.protection_count;
     }
 
+    async function updateEnabledPluginsCount() {
+        const data = await fetchPlugins();
+        const enabled = data.data.filter(p => p.enabled !== false).length;
+        const el = document.getElementById('enabled-plugins-count');
+        if (el) el.textContent = enabled;
+    }
+
     function setModeSelectValue(mode) {
         const select = document.getElementById('mode-select');
         if (!select) return;
@@ -210,7 +329,6 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!tbody) return;
         tbody.innerHTML = '';
 
-        // Existing confirmed rows
         paths.forEach((path, index) => {
             const row = document.createElement('tr');
             row.innerHTML = `
@@ -236,7 +354,6 @@ document.addEventListener('DOMContentLoaded', function () {
             tbody.appendChild(row);
         });
 
-        // Empty row for adding new path
         const emptyRow = document.createElement('tr');
         emptyRow.innerHTML = `
             <td class="number-cell">${paths.length + 1}.</td>
@@ -272,6 +389,77 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         tbody.appendChild(emptyRow);
+    }
+
+    // ============================================================
+    // Command Allowlist rendering
+    // ============================================================
+
+    function renderAllowlist(commands) {
+        const tbody = document.getElementById('allowlistBody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        commands.forEach((cmd, index) => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="number-cell">${index + 1}.</td>
+                <td>
+                    <input type="text" class="font-mono" value="${escapeHtml(cmd)}" readonly>
+                </td>
+                <td class="action-cell">
+                    <button class="action-btn remove-btn btn-sm" data-command="${escapeAttr(cmd)}">Remove</button>
+                </td>
+            `;
+            row.querySelector('.remove-btn').addEventListener('click', async function () {
+                const command = this.dataset.command;
+                try {
+                    await apiDeleteAllowlistCommand(command);
+                    currentAllowlist = currentAllowlist.filter(c => c !== command);
+                    renderAllowlist(currentAllowlist);
+                    showNotification(`Command "${command}" removed from allowlist`, 'success');
+                } catch (err) {
+                    showNotification(err.message, 'error');
+                }
+            });
+            tbody.appendChild(row);
+        });
+
+        const emptyRow = document.createElement('tr');
+        emptyRow.innerHTML = `
+            <td class="number-cell">${commands.length + 1}.</td>
+            <td>
+                <input type="text" class="font-mono" placeholder="e.g., rm" id="new-allowlist-input">
+            </td>
+            <td class="action-cell">
+                <button class="action-btn add-btn btn-sm" id="add-allowlist-btn">Add Command</button>
+            </td>
+        `;
+
+        tbody.appendChild(emptyRow);
+
+        const input = document.getElementById('new-allowlist-input');
+        const addBtn = document.getElementById('add-allowlist-btn');
+
+        addBtn.addEventListener('click', async () => {
+            const cmd = input.value.trim();
+            if (!cmd) {
+                showNotification('Command cannot be empty', 'error');
+                return;
+            }
+            try {
+                await apiAddAllowlistCommand(cmd);
+                currentAllowlist.push(cmd);
+                renderAllowlist(currentAllowlist);
+                showNotification(`Command "${cmd}" added to allowlist`, 'success');
+            } catch (err) {
+                showNotification(err.message, 'error');
+            }
+        });
+
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addBtn.click();
+        });
     }
 
     // ============================================================
@@ -421,8 +609,10 @@ document.addEventListener('DOMContentLoaded', function () {
         fetchConfig().then(config => {
             if (!config) return;
             currentPaths = config.protected_paths || [];
+            currentAllowlist = config.command_allowlist || [];
             currentRules = config.command_rules || [];
             renderProtectedPaths(currentPaths);
+            renderAllowlist(currentAllowlist);
             renderCommandRules(currentRules);
         });
     }
@@ -440,6 +630,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const stats = await fetchStats();
         if (stats) updateStats(stats);
+        await updateEnabledPluginsCount();
 
         const modeSelect = document.getElementById('mode-select');
         if (modeSelect) {
@@ -548,23 +739,9 @@ document.addEventListener('DOMContentLoaded', function () {
         window.addEventListener('beforeunload', () => eventSource.close());
     }
 
-
     // ============================================================
     // Plugin Management Page
     // ============================================================
-
-    async function fetchPlugins() {
-        try {
-            const res = await fetch('/api/plugins');
-            if (res.status === 401) { window.location.href = '/login'; return { data: [] }; }
-            if (!res.ok) throw new Error('Failed to fetch plugins');
-            return await res.json();
-        } catch (err) {
-            console.error(err);
-            Toast.error('Failed to load plugins');
-            return { data: [] };
-        }
-    }
 
     function renderPluginCards(plugins) {
         const container = document.getElementById('plugin-list');
@@ -631,6 +808,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     badge.className = `status-badge ${newEnabled ? 'enabled' : 'disabled'}`;
                     badge.textContent = newEnabled ? 'ENABLED' : 'DISABLED';
                     p.enabled = newEnabled;
+                    updateEnabledPluginsCount(); // refresh dashboard count
                 } catch (err) {
                     Toast.error(err.message);
                     e.target.checked = !newEnabled;
@@ -648,6 +826,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (!res.ok) throw new Error('Delete failed');
                     Toast.success('Plugin deleted');
                     initPluginPage();
+                    updateEnabledPluginsCount();
                 } catch (err) {
                     Toast.error(err.message);
                 }
@@ -690,6 +869,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 Toast.success(`Plugin "${data.data.name}" installed successfully`);
                 fileInput.value = '';
                 initPluginPage();
+                updateEnabledPluginsCount();
             } catch (err) {
                 Toast.error(err.message);
             }
@@ -721,7 +901,6 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-
     // ============================================================
     // Utilities
     // ============================================================
@@ -752,6 +931,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (dashboard && dashboard.classList.contains('active')) {
             const stats = await fetchStats();
             if (stats) updateStats(stats);
+            await updateEnabledPluginsCount();
         }
     }, 5000);
 

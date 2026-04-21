@@ -1,3 +1,4 @@
+<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 
@@ -13,6 +14,35 @@
 <body>
 
     <div id="toast-container" class="toast-container"></div>
+
+    <!-- 密码修改模态框 -->
+    <div id="password-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Change Password</h3>
+                <button class="modal-close" id="close-password-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Current Password</label>
+                    <input type="password" id="old-password" class="filter-input" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label>New Password</label>
+                    <input type="password" id="new-password" class="filter-input" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label>Confirm New Password</label>
+                    <input type="password" id="confirm-password" class="filter-input" autocomplete="off">
+                </div>
+                <div id="password-error" class="error-message" style="margin-top: 8px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" id="cancel-password">Cancel</button>
+                <button class="btn btn-primary" id="submit-password">Submit</button>
+            </div>
+        </div>
+    </div>
 
     <div class="app-layout">
         <aside class="sidebar">
@@ -39,7 +69,9 @@
         <main class="main-content">
             <header class="top-header">
                 <h2 class="page-title">Workspace</h2>
-                <div class="header-actions"><button id="logout-btn" class="btn-logout">Logout</button>
+                <div class="header-actions">
+                    <button id="change-password-btn" class="btn btn-ghost">Change Password</button>
+                    <button id="logout-btn" class="btn-logout">Logout</button>
                 </div>
             </header>
 
@@ -53,6 +85,10 @@
                         <div class="stat-card">
                             <div class="stat-label">Logs</div>
                             <div class="stat-value font-mono highlight" id="log-count">Loading...</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Enabled Plugins</div>
+                            <div class="stat-value font-mono highlight" id="enabled-plugins-count">0</div>
                         </div>
                         <div class="stat-card">
                             <div class="stat-label">Mode</div>
@@ -94,6 +130,25 @@
 
                     <div class="panel rules-section mt-4">
                         <div class="rules-header">
+                            <h4>Command Allowlist</h4>
+                            <span class="badge">Permitted Commands in Protected Paths</span>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th class="number-cell">SEQ</th>
+                                        <th>COMMAND</th>
+                                        <th class="action-cell">ACTION</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="allowlistBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="panel rules-section mt-4">
+                        <div class="rules-header">
                             <h4>Command</h4>
                             <span class="badge">Execution Control</span>
                         </div>
@@ -120,6 +175,7 @@
                 </section>
 
                 <section id="logs" class="page">
+                    <!-- 日志部分保持不变 -->
                     <div class="section-header">
                         <h3>Security Audit Logs</h3>
                         <p class="subtitle">Live streaming telemetry and engine events</p>
@@ -167,6 +223,7 @@
                 </section>
 
                 <section id="plugin" class="page">
+                    <!-- 插件部分保持不变 -->
                     <div class="section-header">
                         <h3>Plugin Management</h3>
                         <p class="subtitle">Extend system capabilities with external modules</p>
@@ -181,16 +238,13 @@
                             </div>
                         </div>
 
-                        <div id="plugin-list" class="plugin-grid">
-                            <!-- 动态渲染插件卡片 -->
-                        </div>
+                        <div id="plugin-list" class="plugin-grid"></div>
 
                         <div class="divider"></div>
 
                         <div class="install-section">
                             <h4>Install New Plugin</h4>
-                            <p class="hint-text">Upload a plugin package (.zip) containing plugin.json and executable.
-                            </p>
+                            <p class="hint-text">Upload a plugin package (.zip) containing plugin.json and executable.</p>
                             <form id="install-plugin-form" style="display: flex; gap: 16px; align-items: flex-end;">
                                 <div style="flex:1;">
                                     <label>Plugin Package</label>
