@@ -346,7 +346,7 @@ input:checked + .slider:before {
     gap: 20px;
 }
 
-.form-group { margin-bottom: 0; }
+.form-group { margin-bottom: 16px; }
 .form-group label {
     display: block;
     margin-bottom: 8px;
@@ -354,7 +354,7 @@ input:checked + .slider:before {
     font-size: 0.85rem;
 }
 
-input[type="text"], input[type="number"], select {
+input[type="text"], input[type="password"], input[type="number"], select {
     width: 100%;
     padding: 10px 12px;
     background-color: var(--bg-input);
