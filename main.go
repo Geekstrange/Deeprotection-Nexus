@@ -940,8 +940,18 @@ func formatLogEntry(entry *LogEntry) string {
 	if err == nil {
 		timeStr = t.Format("2006-01-02 15:04:05")
 	}
-	return fmt.Sprintf("[%s] %s - user %s executed \"%s\" (mode: %s, pid: %d) - %s",
-		timeStr, entry.Level, entry.User, entry.Command, entry.Mode, entry.PID, entry.Message)
+	return fmt.Sprintf("[%s] %s - user: \"%s\", command: \"%s\", cwd: \"%s\" (pid: %d, exit_code: %d, mode: %s) - %s",
+		timeStr, entry.Level, entry.User, entry.Command, entry.WorkingDir, entry.PID, entry.ExitCode, entry.Mode, entry.Message)
+	// [2026-04-29 03:21:31] INFO - user: "root", command: "ls", cwd: "/root/test" (pid: 23468, exit_code: 0, mode: permissive) - no replacement
+	// Timestamp  string `json:"timestamp"`
+	// Level      string `json:"level"`
+	// User       string `json:"user"`
+	// Mode       string `json:"mode"
+	// Command    string `json:"command"`
+	// WorkingDir string `json:"working_dir"`
+	// PID        uint32 `json:"pid"`
+	// ExitCode   int    `json:"exit_code"`
+	// Message    string `json:"message"`
 }
 
 // ============================================================
