@@ -432,7 +432,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 <input type="text" class="font-mono" placeholder="e.g., rm" id="new-allowlist-input">
             </td>
             <td class="action-cell">
-                <button class="action-btn add-btn btn-sm" id="add-allowlist-btn">Add Command</button>
+                <button class="action-btn add-btn btn-sm" id="add-allowlist-btn">Add Cmd</button>
             </td>
         `;
 
@@ -626,6 +626,8 @@ document.addEventListener('DOMContentLoaded', function () {
         if (currentConfig) {
             updateStatus(currentConfig);
             setModeSelectValue(currentConfig.basic?.mode);
+            initFeatureToggles(currentConfig.features || {});
+            initCoreToggles(currentConfig.basic || {});
         }
 
         const stats = await fetchStats();
@@ -648,6 +650,43 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    function initFeatureToggles(features) {
+        const keys = ['syntax_highlighting', 'auto_suggest', 'enhance_completion'];
+        keys.forEach(key => {
+            const el = document.getElementById('feat-' + key);
+            if (!el) return;
+            el.checked = !!features[key];
+            el.addEventListener('change', async function () {
+                const patch = {};
+                patch[key] = this.checked;
+                const result = await updateBasicConfig({ features: patch });
+                if (result) {
+                    showNotification('Feature updated');
+                } else {
+                    this.checked = !this.checked;
+                }
+            });
+        });
+    }
+
+    function initCoreToggles(basic) {
+        ['bash_compat', 'dynamic_config'].forEach(key => {
+            const el = document.getElementById('core-' + key);
+            if (!el) return;
+            el.checked = !!basic[key];
+            el.addEventListener('change', async function () {
+                const patch = {};
+                patch[key] = this.checked;
+                const result = await updateBasicConfig({ basic: patch });
+                if (result) {
+                    showNotification('Core setting updated');
+                } else {
+                    this.checked = !this.checked;
+                }
+            });
+        });
+    }
+
     // ============================================================
     // Logs page
     // ============================================================
@@ -659,7 +698,6 @@ document.addEventListener('DOMContentLoaded', function () {
         const filterCommand = document.getElementById('filter-command');
         const filterTimeStart = document.getElementById('filter-time-start');
         const filterTimeEnd = document.getElementById('filter-time-end');
-        const clearFiltersBtn = document.getElementById('clear-filters');
 
         if (!logOutput) return;
 
@@ -673,6 +711,40 @@ document.addEventListener('DOMContentLoaded', function () {
             const match = line.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/);
             if (!match) return null;
             return new Date(match[1].replace(' ', 'T'));
+        }
+
+        function parseLogLine(line) {
+            const tsMatch = line.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/);
+            const ts = tsMatch ? tsMatch[1] : '';
+            const rest = tsMatch ? line.slice(tsMatch[0].length).trim() : line;
+            let level = '';
+            if (rest.includes('ERROR')) level = 'error';
+            else if (rest.includes('WARN')) level = 'warn';
+            else if (rest.includes('INFO')) level = 'info';
+            return { ts, level, body: rest };
+        }
+
+        function renderLogLine(line) {
+            const { ts, level, body } = parseLogLine(line);
+            const row = document.createElement('div');
+            row.className = 'loki-log-line';
+
+            const tsEl = document.createElement('span');
+            tsEl.className = 'loki-log-ts';
+            tsEl.textContent = ts;
+
+            const lvlEl = document.createElement('span');
+            lvlEl.className = 'loki-log-level' + (level ? ' loki-log-level--' + level : '');
+            lvlEl.textContent = level ? level.toUpperCase() : '—';
+
+            const bodyEl = document.createElement('span');
+            bodyEl.className = 'loki-log-body';
+            bodyEl.textContent = body;
+
+            row.appendChild(tsEl);
+            row.appendChild(lvlEl);
+            row.appendChild(bodyEl);
+            return row;
         }
 
         function renderFilteredLogs() {
@@ -700,8 +772,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 return true;
             });
 
-            logOutput.textContent = [...filtered].reverse().join('\n');
-            logOutput.scrollTop = 0;
+            logOutput.innerHTML = '';
+            [...filtered].reverse().forEach(line => {
+                logOutput.appendChild(renderLogLine(line));
+            });
         }
 
         function addLogLine(line) {
@@ -724,17 +798,6 @@ document.addEventListener('DOMContentLoaded', function () {
         if (filterCommand) filterCommand.addEventListener('input', renderFilteredLogs);
         if (filterTimeStart) filterTimeStart.addEventListener('change', renderFilteredLogs);
         if (filterTimeEnd) filterTimeEnd.addEventListener('change', renderFilteredLogs);
-
-        if (clearFiltersBtn) {
-            clearFiltersBtn.addEventListener('click', function () {
-                if (filterLevel) filterLevel.value = '';
-                if (filterUser) filterUser.value = '';
-                if (filterCommand) filterCommand.value = '';
-                if (filterTimeStart) filterTimeStart.value = '';
-                if (filterTimeEnd) filterTimeEnd.value = '';
-                renderFilteredLogs();
-            });
-        }
 
         window.addEventListener('beforeunload', () => eventSource.close());
     }

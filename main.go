@@ -45,15 +45,24 @@ const (
 // TOML Config Structs
 // ============================================================
 
+type FeaturesConfig struct {
+	SyntaxHighlighting bool `toml:"syntax_highlighting" json:"syntax_highlighting"`
+	AutoSuggest        bool `toml:"auto_suggest" json:"auto_suggest"`
+	TabCompletion      bool `toml:"enhance_completion" json:"enhance_completion"`
+}
+
 type TomlConfig struct {
-	Core  CoreConfig  `toml:"core" json:"core"`
-	Auth  AuthConfig  `toml:"auth" json:"auth"`
-	Paths PathsConfig `toml:"paths" json:"paths"`
-	Rules []TomlRule  `toml:"rules" json:"rules"`
+	Core     CoreConfig     `toml:"core" json:"core"`
+	Features FeaturesConfig `toml:"features" json:"features"`
+	Auth     AuthConfig     `toml:"auth" json:"auth"`
+	Paths    PathsConfig    `toml:"paths" json:"paths"`
+	Rules    []TomlRule     `toml:"rules" json:"rules"`
 }
 
 type CoreConfig struct {
-	Mode string `toml:"mode" json:"mode"`
+	Mode          string `toml:"mode" json:"mode"`
+	BashCompat    bool   `toml:"bash_compat" json:"bash_compat"`
+	DynamicConfig bool   `toml:"dynamic_config" json:"dynamic_config"`
 }
 
 type AuthConfig struct {
@@ -616,7 +625,8 @@ func getConfigHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"basic":             gin.H{"mode": conf.Core.Mode},
+		"basic":             gin.H{"mode": conf.Core.Mode, "bash_compat": conf.Core.BashCompat, "dynamic_config": conf.Core.DynamicConfig},
+		"features":          conf.Features,
 		"protected_paths":   conf.Paths.Protect,
 		"command_allowlist": conf.Paths.Allowlist,
 		"command_rules":     conf.Rules,
@@ -638,6 +648,25 @@ func updateBasicConfigHandler(c *gin.Context) {
 		if basicMap, ok := basicRaw.(map[string]interface{}); ok {
 			if mode, ok := basicMap["mode"].(string); ok {
 				conf.Core.Mode = mode
+			}
+			if v, ok := basicMap["bash_compat"].(bool); ok {
+				conf.Core.BashCompat = v
+			}
+			if v, ok := basicMap["dynamic_config"].(bool); ok {
+				conf.Core.DynamicConfig = v
+			}
+		}
+	}
+	if featRaw, ok := req["features"]; ok {
+		if featMap, ok := featRaw.(map[string]interface{}); ok {
+			if v, ok := featMap["syntax_highlighting"].(bool); ok {
+				conf.Features.SyntaxHighlighting = v
+			}
+			if v, ok := featMap["auto_suggest"].(bool); ok {
+				conf.Features.AutoSuggest = v
+			}
+			if v, ok := featMap["enhance_completion"].(bool); ok {
+				conf.Features.TabCompletion = v
 			}
 		}
 	}

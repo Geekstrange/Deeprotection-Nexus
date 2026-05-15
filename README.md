@@ -11,7 +11,7 @@ The web interface is secured by a password-based login; the first login sets the
 ![Login Page](https://github.com/Geekstrange/Deeprotection-Nexus/blob/main/img/login.png "Login Interface")
 
 ### 2. System Overview
-Displays key info like protection status, expiration time, and protection count.
+Displays key info like protection status, protection count, and core configuration toggles (mode, bash compatibility, dynamic config). Includes feature toggles for shell enhancement modules.
 
 **Preview:**  
 ![System Overview](https://github.com/Geekstrange/Deeprotection-Nexus/blob/main/img/system-overview.png "System Overview Interface")
@@ -23,7 +23,7 @@ Manage protected paths and command interception rules.
 ![Rule Management](https://github.com/Geekstrange/Deeprotection-Nexus/blob/main/img/rule-management.png "Rule Management Interface")
 
 ### 4. Log Viewing
-View system protection logs in real time via Server-Sent Events (SSE).
+View system protection logs in real time via Server-Sent Events (SSE). The log viewer uses a Grafana Loki-inspired design with structured rows, color-coded level badges, and time-range filtering.
 
 **Preview:**  
 ![Log Viewing](https://github.com/Geekstrange/Deeprotection-Nexus/blob/main/img/log-viewing.png "Real-time Log View")
@@ -51,8 +51,14 @@ The default listen address is `127.0.0.1:80`. After startup, open `http://127.0.
 The configuration file is located at `/etc/deeprotection/config.toml` and includes:
 
 - `core.mode`: Protection mode (`disable`, `permissive`, or `enforcing`).
+- `core.bash_compat`: Enable bash compatibility mode.
+- `core.dynamic_config`: Allow runtime config reloading.
+- `features.syntax_highlighting`: Colorize command input for better readability.
+- `features.auto_suggest`: Show inline command suggestions from history.
+- `features.enhance_completion`: Enable enhanced tab-completion for commands and paths.
 - `auth.password_hash`: SHA-256 hex digest of the admin password.
 - `paths.protect`: List of protected file/directory paths.
+- `paths.allowlist`: List of allowed commands that bypass interception.
 - `rules`: Array of command interception rules.
 
 ## Logs

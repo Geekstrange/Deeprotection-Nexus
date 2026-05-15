@@ -100,6 +100,63 @@
                                 </select>
                             </div>
                         </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Bash Compat</div>
+                            <div class="stat-value font-mono">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="core-bash_compat">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Dynamic Config</div>
+                            <div class="stat-value font-mono">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="core-dynamic_config">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel mt-4">
+                        <div class="rules-header">
+                            <h4>Feature Toggles</h4>
+                            <span class="badge">Shell Enhancement Modules</span>
+                        </div>
+                        <div class="features-grid" id="features-toggles">
+                            <div class="feature-item">
+                                <div class="feature-info">
+                                    <div class="feature-name">Syntax Highlighting</div>
+                                    <div class="feature-desc">Colorize command input for better readability</div>
+                                </div>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="feat-syntax_highlighting">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="feature-item">
+                                <div class="feature-info">
+                                    <div class="feature-name">Auto Suggest</div>
+                                    <div class="feature-desc">Show inline command suggestions from history</div>
+                                </div>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="feat-auto_suggest">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="feature-item">
+                                <div class="feature-info">
+                                    <div class="feature-name">Enhance Completion</div>
+                                    <div class="feature-desc">Enable enhanced tab-completion for commands and paths</div>
+                                </div>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="feat-enhance_completion">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
@@ -175,49 +232,32 @@
                 </section>
 
                 <section id="logs" class="page">
-                    <!-- 日志部分保持不变 -->
                     <div class="section-header">
                         <h3>Security Audit Logs</h3>
                         <p class="subtitle">Live streaming telemetry and engine events</p>
                     </div>
-                    <div class="panel console-panel">
-                        <div class="log-filters">
-                            <div class="filter-group">
-                                <label>Level</label>
-                                <select id="filter-level" class="filter-select">
-                                    <option value="">All</option>
+                    <div class="loki-panel">
+                        <div class="loki-toolbar">
+                            <div class="loki-query-row">
+                                <select id="filter-level" class="loki-select">
+                                    <option value="">Level: All</option>
                                     <option value="INFO">INFO</option>
                                     <option value="WARN">WARN</option>
                                     <option value="ERROR">ERROR</option>
                                 </select>
+                                <input type="text" id="filter-user" class="loki-input" placeholder="{user=&quot;...&quot;}">
+                                <input type="text" id="filter-command" class="loki-input" placeholder="{command=&quot;...&quot;}">
+                                <input type="datetime-local" id="filter-time-start" class="loki-input loki-time">
+                                <span class="loki-time-sep">to</span>
+                                <input type="datetime-local" id="filter-time-end" class="loki-input loki-time">
                             </div>
-                            <div class="filter-group">
-                                <label>User</label>
-                                <input type="text" id="filter-user" class="filter-input font-mono"
-                                    placeholder="Filter by user...">
-                            </div>
-                            <div class="filter-group">
-                                <label>Command</label>
-                                <input type="text" id="filter-command" class="filter-input font-mono"
-                                    placeholder="Filter by command...">
-                            </div>
-                            <div class="filter-group filter-time-group">
-                                <label>From</label>
-                                <input type="datetime-local" id="filter-time-start" class="filter-time-input">
-                            </div>
-                            <div class="filter-group filter-time-group">
-                                <label>To</label>
-                                <input type="datetime-local" id="filter-time-end" class="filter-time-input">
-                            </div>
-                            <div class="filter-group filter-actions">
-                                <button id="clear-filters" class="btn btn-sm btn-ghost">Clear Filters</button>
-                            </div>
-                            <div class="console-status">
-                                <span class="pulse-dot"></span> Live
+                            <div class="loki-status">
+                                <span class="pulse-dot"></span>
+                                <span>Live</span>
                             </div>
                         </div>
-                        <div class="log-container">
-                            <pre id="log-output" class="font-mono"></pre>
+                        <div class="loki-log-view">
+                            <div id="log-output" class="loki-log-lines"></div>
                         </div>
                     </div>
                 </section>

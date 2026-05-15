@@ -449,68 +449,149 @@ input:focus, select:focus {
     overflow: hidden;
 }
 
-.log-filters {
+/* Loki-style log viewer */
+.loki-panel {
+    display: flex;
+    flex-direction: column;
+    height: 650px;
+    background: #181b1f;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.loki-toolbar {
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 12px 20px;
-    background-color: var(--bg-input);
-    border-bottom: 1px solid var(--border-color);
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: #111317;
+    border-bottom: 1px solid #2a2f3a;
+    gap: 12px;
     flex-wrap: wrap;
 }
 
-.filter-group {
+.loki-query-row {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
+    flex: 1;
 }
 
-.filter-group label {
-    color: var(--text-secondary);
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    white-space: nowrap;
-}
-
-.filter-select, .filter-input {
-    background-color: var(--bg-panel);
-    border: 1px solid var(--border-light);
+.loki-select, .loki-input {
+    background: #0b0d10;
+    border: 1px solid #3d4554;
     border-radius: 4px;
-    color: var(--text-primary);
-    padding: 6px 10px;
-    font-size: 0.85rem;
-    min-width: 120px;
+    color: #e2e8f0;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
 }
 
-.filter-input {
+.loki-select:focus, .loki-input:focus {
+    border-color: #3b82f6;
+    outline: none;
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3);
+}
+
+.loki-input {
+    min-width: 160px;
+}
+
+.loki-time {
     min-width: 180px;
 }
 
-.filter-input:focus, .filter-select:focus {
-    border-color: var(--brand-blue);
-    outline: none;
+.loki-time-sep {
+    color: var(--text-muted);
+    font-size: 0.75rem;
 }
 
-.filter-actions {
-    margin-left: auto;
-}
-
-.console-status {
+.loki-status {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 0.85rem;
+    gap: 6px;
+    font-size: 0.8rem;
     color: var(--success-green);
     font-family: var(--font-mono);
-    margin-left: auto;
+    white-space: nowrap;
 }
 
-.log-container {
+.loki-log-view {
     flex: 1;
-    background-color: #000;
-    padding: 16px;
     overflow-y: auto;
+    background: #0b0d10;
+}
+
+.loki-log-lines {
+    display: flex;
+    flex-direction: column;
+}
+
+.loki-log-line {
+    display: flex;
+    align-items: flex-start;
+    padding: 4px 16px;
+    border-bottom: 1px solid #1a1d23;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    transition: background 0.1s;
+}
+
+.loki-log-line:hover {
+    background: #1c2028;
+}
+
+.loki-log-ts {
+    color: #4ec9b0;
+    white-space: nowrap;
+    margin-right: 12px;
+    user-select: all;
+    flex-shrink: 0;
+}
+
+.loki-log-level {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-right: 12px;
+    min-width: 44px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.loki-log-level--info {
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+}
+
+.loki-log-level--warn {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+}
+
+.loki-log-level--error {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+}
+
+.loki-log-body {
+    color: #d4d4d4;
+    word-break: break-all;
+    white-space: pre-wrap;
+}
+
+.loki-log-label {
+    color: #ce9178;
+}
+
+.loki-log-value {
+    color: #9cdcfe;
 }
 
 .pulse-dot { 
@@ -526,42 +607,18 @@ input:focus, select:focus {
     100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } 
 }
 
-pre { 
-    color: #a5d6ff; 
-    font-size: 13px; 
-    line-height: 1.6; 
-    white-space: pre-wrap; 
-    word-wrap: break-word; 
-}
-
-/* 时间范围筛选框样式 */
-.filter-time-group {
-    min-width: 180px;
-}
-
-.filter-time-input {
-    background-color: var(--bg-panel);
-    border: 1px solid var(--border-light);
-    border-radius: 4px;
-    color: var(--text-primary);
-    padding: 6px 10px;
-    font-size: 0.85rem;
-    font-family: var(--font-mono);
-    width: 100%;
-}
-
-.filter-time-input:focus {
-    border-color: var(--brand-blue);
-    outline: none;
+pre {
+    color: #a5d6ff;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 /* 确保筛选栏换行时依然美观 */
 @media (max-width: 1200px) {
-    .log-filters {
-        gap: 12px;
-    }
-    .filter-time-group {
-        min-width: 160px;
+    .loki-query-row {
+        gap: 8px;
     }
 }
 
@@ -722,6 +779,42 @@ input:checked + .toggle-slider:before {
 
 .install-section {
     margin-top: 20px;
+}
+
+/* Feature Toggles */
+.features-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.feature-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.feature-item:last-child {
+    border-bottom: none;
+}
+
+.feature-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.feature-name {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.feature-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
 }
 
 /* ============================================================
